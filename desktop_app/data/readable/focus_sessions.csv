@@ -1,9 +1,0 @@
-﻿task,category,mode,counts_toward_focus,started_at,ended_at,local_date,planned_minutes,minutes,notes,completed,source,synced
-Test,Research,Focus,1,2026-07-01T18:37:46+03:30,2026-07-01T18:42:45+03:30,20260701,5,5,,1,app,1
-Signal Prj Report,Coursework,Focus,1,2026-07-01T21:46:20+03:30,2026-07-01T22:31:18+03:30,20260701,25,25,,1,app,1
-Signal Prj Report,Coursework,Focus,1,2026-07-01T23:37:41+03:30,2026-07-02T00:03:06+03:30,20260702,25,25,,1,app,1
-Signal Prj Report,Coursework,Focus,1,2026-07-02T00:05:49+03:30,2026-07-02T00:54:43+03:30,20260702,25,25,,1,app,1
-test,Research,Flow,1,2026-07-03T04:50:57+03:30,2026-07-03T04:52:12+03:30,20260703,1,1,,1,app,1
-test2,Research,Focus,1,2026-07-03T05:13:41+03:30,2026-07-03T05:20:46+03:30,20260703,25,7,,1,app,1
-test21,Coding,Focus,1,2026-07-03T05:37:57+03:30,2026-07-03T12:43:24+03:30,20260703,25,425,,1,app,1
-Focused work,Research,Focus,1,2026-07-13T22:34:09+03:30,2026-07-13T22:50:06+03:30,20260713,25,16,,1,app,1
