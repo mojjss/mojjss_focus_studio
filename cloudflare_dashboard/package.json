@@ -1,0 +1,14 @@
+{
+  "name": "mojjss-focus-studio-dashboard",
+  "private": true,
+  "version": "5.0.0",
+  "scripts": {
+    "dev": "wrangler pages dev public --d1 DB=focus-studio-dashboard",
+    "check": "wrangler pages functions build functions --outfile .wrangler/functions.js",
+    "deploy": "wrangler pages deploy public --project-name focus-studio-dashboard --branch main"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  },
+  "type": "module"
+}

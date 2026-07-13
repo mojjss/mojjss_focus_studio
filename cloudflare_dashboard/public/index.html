@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b1220">
+<meta name="robots" content="noindex,nofollow">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="/style-v50.css?v=5.0">
+<title>mojjss live activity</title>
+</head>
+<body>
+<div id="login" class="login-overlay">
+  <form id="loginForm" class="login-card">
+    <div class="eyebrow">PRIVATE DASHBOARD</div>
+    <h1>mojjss live activity</h1>
+    <p>Enter a viewer key for the normal user, or the owner key for the full history view. It stays only in this browser.</p>
+    <label for="readKey">Viewer or owner key</label>
+    <input id="readKey" type="password" autocomplete="current-password" required>
+    <button type="submit">Open dashboard</button>
+    <div id="loginError" class="error"></div>
+  </form>
+</div>
+
+<div class="shell">
+<header>
+  <div class="brand">
+    <small>MOJJSS</small>
+    <h1>mojjss live activity</h1>
+    <div class="profile-links">
+      <a href="https://mojsadafi.ir" target="_blank" rel="noopener">mojsadafi.ir</a>
+      <a href="https://github.com/mojjss" target="_blank" rel="noopener">github.com/mojjss</a>
+    </div>
+  </div>
+  <div class="header-right">
+    <span id="clock" class="clock">--:--:--</span>
+    <button id="themeButton" class="icon-button" type="button">◐ Theme</button>
+    <button id="logoutButton" class="icon-button" type="button">Lock</button>
+    <span id="accessRole" class="badge role-badge">Viewer</span>
+    <span id="connection" class="badge offline">Locked</span>
+  </div>
+</header>
+
+<div class="dashboard-stack">
+  <section class="card current">
+    <div class="label">CURRENT ACTIVITY</div>
+    <div id="task" class="task">No cloud data yet</div>
+    <div class="pills">
+      <span id="mode" class="pill">Idle</span>
+      <span id="category" class="pill">—</span>
+      <span id="focusFlag" class="pill">Not counting as focus</span>
+    </div>
+    <div id="timer" class="timer">00:00</div>
+    <div class="progress"><div id="progressBar"></div></div>
+    <div class="timer-sub">
+      <span id="timerStatus">Waiting for Focus Studio</span>
+      <span id="updated">—</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="section-heading">
+      <div>
+        <div class="label">LATEST ACTIVITY</div>
+        <h2>Recent sessions</h2>
+      </div>
+      <span id="recentCount" class="small">0 sessions</span>
+    </div>
+    <div id="recent" class="empty">No sessions yet.</div>
+    <div class="recent-controls">
+      <button id="showMoreSessions" type="button">Show more</button>
+      <button id="showFewerSessions" type="button">Show fewer</button>
+    </div>
+  </section>
+
+<section class="card camera-card">
+  <div class="section-heading">
+    <div>
+      <div class="label">SECURE REMOTE CAMERA</div>
+      <h2>Live desktop camera</h2>
+    </div>
+    <div class="camera-actions">
+      <span id="cameraBadge" class="badge offline">Disabled</span>
+      <button id="cameraButton" class="camera-button" type="button">
+        Connect camera
+      </button>
+    </div>
+  </div>
+
+  <div id="cameraRouteNotice" class="camera-route-notice">
+    <div>
+      <strong>No Tailscale app is required for the Cloudflare route.</strong>
+      <span>
+        The camera is reached at camera.timer.mojjss.ir through Cloudflare Tunnel.
+        The desktop app must be running and the camera permission must be enabled.
+      </span>
+    </div>
+    <button id="cameraRetryButton" type="button">Retry camera connection</button>
+  </div>
+
+  <form id="cameraUnlockForm" class="camera-unlock" novalidate>
+    <label for="cameraPassword">Camera viewer password</label>
+    <div class="camera-password-wrap">
+      <input
+        id="cameraPassword"
+        type="password"
+        autocomplete="current-password"
+        placeholder="Separate from the dashboard read key"
+        aria-describedby="cameraPasswordState"
+      >
+      <button
+        id="cameraPasswordToggle"
+        class="password-toggle"
+        type="button"
+        aria-label="Show camera password"
+      >Show</button>
+    </div>
+    <div class="camera-password-feedback">
+      <span id="cameraPasswordState" class="password-state empty">
+        No camera password entered
+      </span>
+      <span>Kept only until this browser tab closes.</span>
+    </div>
+  </form>
+
+  <div class="private-camera-steps" aria-live="polite">
+    <div id="cameraStepTailnet" class="private-camera-step">
+      <span>1</span>
+      <strong>Secure route</strong>
+      <small>Cloudflare Tunnel</small>
+    </div>
+    <div id="cameraStepPassword" class="private-camera-step">
+      <span>2</span>
+      <strong>Password</strong>
+      <small>Local verification</small>
+    </div>
+    <div id="cameraStepStream" class="private-camera-step">
+      <span>3</span>
+      <strong>Stream</strong>
+      <small>Direct from laptop</small>
+    </div>
+  </div>
+
+  <div id="cameraViewport" class="camera-viewport private-camera-viewport">
+    <img id="cameraStream" alt="Private live camera">
+    <div id="cameraPlaceholder" class="camera-placeholder">
+      The private camera stream appears here. No phone VPN app is required;
+      the desktop owner only needs to keep the app and Cloudflare Tunnel online.
+    </div>
+  </div>
+
+  <div class="camera-meta">
+    <span id="cameraStatus" role="status" aria-live="polite">
+      Private camera is disabled.
+    </span>
+    <span id="cameraIdentity">No viewer session yet</span>
+  </div>
+
+  <div class="camera-secondary-actions">
+    <button id="cameraOpenPrivateButton" type="button">
+      Open camera viewer page
+    </button>
+    <span id="cameraPrivateUrl">Private URL not configured</span>
+  </div>
+
+  <div class="privacy-note">
+    The video is sent from the laptop through Cloudflare Tunnel and is protected
+    by the separate camera password. It contains no microphone audio, uses a
+    short-lived viewing token, rate-limits incorrect passwords, and stops when
+    this page is hidden or closed.
+  </div>
+</section>
+
+  <section class="card">
+    <div class="section-heading">
+      <h2 id="summaryTitle">Today at a glance</h2>
+      <div class="tabs" id="summaryTabs">
+        <button type="button" data-period="today" class="active">Today</button>
+        <button type="button" data-period="week">Week</button>
+        <button type="button" data-period="month">Month</button>
+      </div>
+    </div>
+    <div class="stats">
+      <div class="stat">
+        <span class="label">FOCUSED</span>
+        <b id="focus">0m</b>
+        <span id="focusHours" class="small">0 hours</span>
+      </div>
+      <div class="stat">
+        <span class="label">OTHER PRODUCTIVE</span>
+        <b id="productive">0m</b>
+        <span class="small">calls · meetings · admin</span>
+      </div>
+      <div class="stat">
+        <span class="label">TOTAL PRODUCTIVE</span>
+        <b id="totalProductive">0m</b>
+        <span class="small">focus + other work</span>
+      </div>
+      <div class="stat">
+        <span class="label">SESSIONS</span>
+        <b id="sessions">0</b>
+        <span class="small">completed in this period</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="section-heading">
+      <h2 id="scheduleTitle">Today's schedule</h2>
+      <div class="tabs" id="scheduleTabs">
+        <button type="button" data-view="day" class="active">Day</button>
+        <button type="button" data-view="week">Week</button>
+        <button type="button" data-view="month">Month</button>
+      </div>
+    </div>
+    <div id="nextEvent" class="next">
+      <span class="label">NEXT</span>
+      <b>No upcoming item</b>
+    </div>
+    <div id="schedule" class="empty">No scheduled items.</div>
+  </section>
+
+  <section class="card pixela-wide-card">
+    <div class="section-heading">
+      <div>
+        <div class="label">PIXELA</div>
+        <h2>Full focus activity graph</h2>
+      </div>
+      <a id="openPixela" class="external-link" href="#" target="_blank" rel="noopener">
+        Open Pixela dashboard ↗
+      </a>
+    </div>
+    <div class="graph-wrap">
+      <img id="graph" class="graph" alt="Pixela focus graph">
+    </div>
+    <div class="sync-line">
+      <span id="syncDot" class="dot warn"></span>
+      <span id="pixelaStatus">Pixela status unavailable</span>
+    </div>
+  </section>
+</div>
+
+<div class="footer">
+  mojjss Focus Studio v5.0 · timer.mojjss.ir · github.com/mojjss
+</div>
+</div>
+<script src="/app-v50.js?v=5.0" defer></script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local application data and secrets
+desktop_app/config.json
+desktop_app/focus_history.db
+desktop_app/focus_history.db-*
+desktop_app/schedule.csv
+desktop_app/readable_data/
+desktop_app/exports/
+desktop_app/backups/
+desktop_app/*.log
+desktop_app/PRIVATE_CAMERA_DIAGNOSTIC.txt
+
+# Cloudflare / Wrangler local and secret files
+cloudflare_dashboard/node_modules/
+cloudflare_dashboard/.wrangler/
+cloudflare_dashboard/.dev.vars
+cloudflare_dashboard/wrangler.toml
+cloudflare_dashboard/.secrets*.json
+cloudflare_dashboard/*PRIVATE*.txt
+
+# Cloudflare Tunnel credentials
+*.pem
+*.crt
+*.key
+*.json.credentials
+cert.pem
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

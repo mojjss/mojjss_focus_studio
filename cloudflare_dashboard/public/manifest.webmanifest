@@ -1,0 +1,9 @@
+{
+  "name": "mojjss live activity",
+  "short_name": "mojjss activity",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#08111f",
+  "theme_color": "#0b1220",
+  "description": "mojjss live activity \u2014 private Tailscale camera inside the Cloudflare dashboard"
+}

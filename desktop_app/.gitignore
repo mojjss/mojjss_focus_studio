@@ -1,0 +1,11 @@
+config.json
+focus_history.db
+focus_history.db-*
+schedule.csv
+readable_data/
+exports/
+backups/
+*.log
+PRIVATE_CAMERA_DIAGNOSTIC.txt
+__pycache__/
+*.py[cod]

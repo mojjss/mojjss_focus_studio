@@ -1,0 +1,5 @@
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  Content-Security-Policy: default-src 'self'; img-src 'self' data: blob: https://pixe.la https://*.ts.net https://camera.timer.mojjss.ir; style-src 'self'; script-src 'self'; connect-src 'self' https://*.ts.net https://camera.timer.mojjss.ir; frame-ancestors 'none'
