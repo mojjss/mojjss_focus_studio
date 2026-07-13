@@ -47,8 +47,8 @@
   "remote_camera_jpeg_quality": 72,
   "remote_camera_idle_seconds": 15,
   "tailscale_camera_port": 8788,
-  "tailscale_camera_url": "https://camera.timer.mojjss.ir",
-  "tailscale_camera_allowed_origin": "https://timer.mojjss.ir, https://camera.timer.mojjss.ir",
+  "tailscale_camera_url": "https://camera.mojjss.ir",
+  "tailscale_camera_allowed_origin": "https://timer.mojjss.ir, https://camera.mojjss.ir",
   "tailscale_camera_require_identity": false,
   "tailscale_camera_allowed_users": ""
 }

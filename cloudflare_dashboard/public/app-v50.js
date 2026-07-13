@@ -436,8 +436,8 @@ async function privateCameraFetch(path, options = {}) {
     );
   } catch (error) {
     throw new Error(
-      "Could not reach the laptop through Tailscale. " +
-      "Connect Tailscale on this device, confirm the laptop is online, " +
+      "Could not reach the laptop through the secure camera route. " +
+      "Confirm the desktop app and Cloudflare Tunnel are online, " +
       "then press Retry."
     );
   }
@@ -549,7 +549,7 @@ function updatePrivateCameraControls() {
     );
   } else if (!base) {
     setPrivateCameraMessage(
-      "Configure Cloudflare Tunnel for camera.timer.mojjss.ir.",
+      "Configure Cloudflare Tunnel for camera.mojjss.ir.",
       "error",
       true,
     );

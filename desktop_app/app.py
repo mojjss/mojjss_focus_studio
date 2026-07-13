@@ -224,7 +224,7 @@ class FocusApp(ctk.CTk):
                     self.config_data.get("remote_camera_index", 0)
                 ),
                 "audio": False,
-                "mode": "tailscale-private-mjpeg",
+                "mode": "secure-remote-mjpeg",
                 "private_url": str(
                     self.config_data.get("tailscale_camera_url", "")
                 ).rstrip("/"),
@@ -370,10 +370,9 @@ class FocusApp(ctk.CTk):
     def _camera_allowed_origins(self) -> str:
         """Return every browser origin allowed to call the private camera API.
 
-        The built-in Tailscale viewer performs same-origin POST requests. Browsers
-        still attach an Origin header to those POST requests, so the Tailscale
-        camera URL itself must be included alongside any Cloudflare dashboard
-        origin.
+        The built-in camera viewer performs same-origin POST requests. Browsers
+        still attach an Origin header to those POST requests, so the configured
+        camera URL itself must be included alongside any dashboard origin.
         """
         from urllib.parse import urlparse
 
@@ -395,7 +394,7 @@ class FocusApp(ctk.CTk):
                 if origin not in origins:
                     origins.append(origin)
 
-        # Always allow the private Tailscale site itself. This is required for
+        # Always allow the configured camera site itself. This is required for
         # /viewer -> /api/unlock, because POST fetches include an Origin header
         # even when the request is same-origin.
         add_values(self.config_data.get("tailscale_camera_url", ""))
@@ -409,7 +408,7 @@ class FocusApp(ctk.CTk):
         # migration from earlier releases.
         add_values(self.config_data.get("cloud_dashboard_url", ""))
         add_values("https://timer.mojjss.ir")
-        add_values("https://camera.timer.mojjss.ir")
+        add_values("https://camera.mojjss.ir")
         add_values("https://focus-studio-dashboard.pages.dev")
 
         return ", ".join(origins)
@@ -505,11 +504,11 @@ class FocusApp(ctk.CTk):
         ).strip()
         if enabled and private_url:
             self.camera_status_var.set(
-                "Private camera: enabled · waiting for Tailscale viewer"
+                "Private camera: enabled · waiting for remote viewer"
             )
         elif enabled:
             self.camera_status_var.set(
-                "Private camera: local server ready · configure Tailscale Serve"
+                "Private camera: local server ready · configure a secure route"
             )
         else:
             self.camera_status_var.set("Private camera: disabled")
@@ -662,7 +661,7 @@ class FocusApp(ctk.CTk):
         if not url:
             messagebox.showinfo(
                 "Private camera URL",
-                "Configure Tailscale Serve first.",
+                "Configure the camera public/private URL first.",
             )
             return
         webbrowser.open(url.rstrip("/") + "/viewer")
@@ -3129,7 +3128,7 @@ class SettingsPage(PageBase):
             text=(
                 "The local camera server listens only on 127.0.0.1. You can expose "
                 "it privately with Tailscale Serve, or publish it at "
-                "camera.timer.mojjss.ir with Cloudflare Tunnel. For the easy "
+                "camera.mojjss.ir with Cloudflare Tunnel. For the easy "
                 "Android route, turn off the Tailscale identity requirement and "
                 "keep the separate camera password enabled."
             ),
@@ -3303,7 +3302,7 @@ class SettingsPage(PageBase):
         if not 1024 <= new_config["tailscale_camera_port"] <= 65535:
             messagebox.showerror(
                 "Invalid settings",
-                "The Tailscale camera port must be from 1024 to 65535.",
+                "The local camera server port must be from 1024 to 65535.",
             )
             return False
         if (
@@ -3343,19 +3342,33 @@ class SettingsPage(PageBase):
             )
             return False
 
-        tailscale_url = str(
+        camera_url = str(
             new_config.get("tailscale_camera_url", "")
-        ).strip()
-        if tailscale_url and not (
-            tailscale_url.startswith("https://")
-            and ".ts.net" in tailscale_url
-        ):
-            messagebox.showerror(
-                "Invalid Tailscale URL",
-                "Use the private HTTPS URL shown by `tailscale serve`, "
-                "for example https://your-laptop.your-tailnet.ts.net",
+        ).strip().rstrip("/")
+        if camera_url:
+            from urllib.parse import urlparse
+
+            try:
+                parsed_camera_url = urlparse(camera_url)
+            except ValueError:
+                parsed_camera_url = None
+
+            is_valid_https_url = bool(
+                parsed_camera_url
+                and parsed_camera_url.scheme.lower() == "https"
+                and parsed_camera_url.netloc
+                and not parsed_camera_url.username
+                and not parsed_camera_url.password
             )
-            return False
+            if not is_valid_https_url:
+                messagebox.showerror(
+                    "Invalid camera URL",
+                    "Use a complete HTTPS address, for example "
+                    "https://camera.mojjss.ir or "
+                    "https://your-laptop.your-tailnet.ts.net",
+                )
+                return False
+            new_config["tailscale_camera_url"] = camera_url
 
         categories = [line.strip() for line in self.categories_text.get("1.0", "end").splitlines() if line.strip()]
         new_config["categories"] = list(dict.fromkeys(categories)) or ["General"]
