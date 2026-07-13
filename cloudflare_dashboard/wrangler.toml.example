@@ -1,8 +1,0 @@
-name = "focus-studio-dashboard"
-pages_build_output_dir = "./public"
-compatibility_date = "2026-07-13"
-
-[[d1_databases]]
-binding = "DB"
-database_name = "focus-studio-dashboard"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"

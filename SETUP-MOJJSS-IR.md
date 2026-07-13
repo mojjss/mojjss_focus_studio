@@ -1,80 +1,32 @@
-# Setup order for `mojjss.ir`
+# Setup order for `mojjss.ir` — dashboard-only method
 
-## 1. Activate the domain in Cloudflare DNS
-
-Add `mojjss.ir` to Cloudflare, choose the Free plan, copy the two assigned
-nameservers, and set those nameservers at the `.ir` registrar. Continue only
-after Cloudflare reports the zone as **Active**.
-
-## 2. Put this repository on GitHub
-
-The repository is prepared so local secrets, the Pixela token, SQLite data,
-Wrangler secrets, and Tunnel credentials are ignored. Before pushing, run:
-
-```powershell
-git status --ignored
-```
-
-Confirm that `desktop_app/config.json`, `focus_history.db`, `schedule.csv`,
-`cloudflare_dashboard/wrangler.toml`, and any private key files are not staged.
-
-## 3. Create the dashboard
-
-In Cloudflare Pages, create or connect a project named
-`focus-studio-dashboard` with `cloudflare_dashboard` as the project root.
-Attach this custom domain:
+1. Wait until `mojjss.ir` is **Active** in Cloudflare DNS.
+2. Push this repository to GitHub. Confirm private desktop data and key files
+   are ignored.
+3. Create a Cloudflare **Pages** Git project with:
 
 ```text
-timer.mojjss.ir
+Root directory: cloudflare_dashboard
+Build command: exit 0
+Build output directory: public
 ```
 
-Create a D1 database named `focus-studio-dashboard`, copy
-`wrangler.toml.example` to `wrangler.toml`, insert the D1 database ID, and run:
-
-```powershell
-cd cloudflare_dashboard
-npm install
-npx wrangler d1 execute focus-studio-dashboard --remote --file=./schema.sql
-```
-
-Run `GENERATE-AND-SET-SECRETS.bat`, then deploy with
-`DEPLOY-TIMER-MOJJSS.bat`.
-
-## 4. Connect the desktop snapshot
-
-In the desktop app:
-
-```text
-Dashboard URL: https://timer.mojjss.ir
-Desktop write key: DESKTOP_WRITE_KEY from PRIVATE-CLOUDFLARE-KEYS.txt
-```
-
-Enable cloud publishing and test the upload.
-
-## 5. Create the camera route
-
-Create a Cloudflare Tunnel published application:
+4. Create D1 database `focus-studio-dashboard`; open its Console, paste all of
+   `cloudflare_dashboard/schema.sql`, and execute it.
+5. Bind that database to the Pages project with variable name `DB`.
+6. Run `cloudflare_dashboard/GENERATE-LOCAL-SECRETS.bat`, then add all three
+   generated values in Pages -> Settings -> Variables and Secrets as encrypted
+   secrets.
+7. Redeploy the Pages project and attach `timer.mojjss.ir` as its custom domain.
+8. Configure the Python desktop app with the dashboard URL and
+   `DESKTOP_WRITE_KEY`.
+9. Create a Cloudflare Tunnel route:
 
 ```text
 camera.timer.mojjss.ir -> http://127.0.0.1:8788
 ```
 
-Install `cloudflared` as a Windows service using the command shown by
-Cloudflare or `desktop_app/INSTALL-CLOUDFLARED-SERVICE.bat`.
+10. Configure the camera URL/origins in the desktop app and keep Tailscale
+identity checking off for the Cloudflare camera route.
 
-Configure the desktop camera:
-
-```text
-Camera URL: https://camera.timer.mojjss.ir
-Allowed origins: https://timer.mojjss.ir, https://camera.timer.mojjss.ir
-Require Tailscale identity headers: Off
-```
-
-Set a strong camera password and enable the camera.
-
-## 6. Daily use
-
-- Normal viewer: `https://timer.mojjss.ir` + viewer key + camera password.
-- Owner: the same URL + owner key + camera password.
-- The dashboard stays online when the PC is off, but its snapshot is stale.
-- The live camera works only while the desktop app and `cloudflared` are online.
+Detailed instructions are in `CLOUDFLARE-DASHBOARD-ONLY-SETUP.md`.

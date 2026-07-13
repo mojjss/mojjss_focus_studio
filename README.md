@@ -1,127 +1,52 @@
-# mojjss Focus Studio v5.0
+# mojjss Focus Studio v5.1 — no local npm required
 
-A desktop focus timer with SQLite history, Pixela synchronization, a Cloudflare
-Pages dashboard, and an optional live camera route for phones.
+A Python desktop focus timer with SQLite history, Pixela synchronization, a
+Cloudflare Pages dashboard, and an optional Cloudflare Tunnel camera route.
 
-## Recommended domain layout
+## Recommended addresses
 
 ```text
 https://timer.mojjss.ir
-  Cloudflare Pages dashboard. This stays online even when the desktop is off,
-  but its data becomes stale until the desktop reconnects.
+  Owner/viewer dashboard hosted by Cloudflare Pages.
 
 https://camera.timer.mojjss.ir
-  Cloudflare Tunnel to http://127.0.0.1:8788 on the desktop. This is available
-  only while the desktop app and cloudflared service are running.
-
-https://desktop-....ts.net
-  Optional Tailscale fallback for the owner PC.
+  Cloudflare Tunnel to the camera server on the desktop PC.
 ```
 
-The normal Android user does not need Tailscale or Google login. They use the
-viewer dashboard key and the separate camera password. The owner uses a
-different owner key and receives a larger session history with session notes.
+## Deployment model
 
-## v5.0 changes
+The website is connected to GitHub through Cloudflare Pages. Every push to the
+configured branch triggers a new Pages deployment. Local `npm`, Wrangler, and
+`node_modules` are not required for production setup.
 
-- Desktop Session Log now uses 100-row pages with First, Previous, Next, and
-  Last controls.
-- Web session history now has Show more / Show fewer controls.
-- Separate viewer and owner dashboard keys.
-- Owner mode can receive up to 250 recent sessions; viewer mode receives 30 and
-  does not receive notes/source fields.
-- Default dashboard domain is `timer.mojjss.ir`.
-- Optional camera route is `camera.timer.mojjss.ir` through Cloudflare Tunnel.
-- Public camera mode no longer needs Tailscale identity headers.
-- Five failed camera passwords from one client trigger a 15-minute lockout.
-- GitHub-safe repository layout: local config, Pixela token, database, schedule,
-  Wrangler secrets, and tunnel credentials are ignored.
-
-## Desktop upgrade
-
-Copy these private files from the existing installation into `desktop_app`:
+The Pages project contains:
 
 ```text
-config.json
-focus_history.db
-schedule.csv
+cloudflare_dashboard/public/      static HTML, CSS and JavaScript
+cloudflare_dashboard/functions/   server-side Pages Functions
+cloudflare_dashboard/schema.sql   D1 schema
 ```
 
-Then run:
+The Functions use only Cloudflare runtime APIs and local modules, so there are
+no external JavaScript dependencies.
 
-```powershell
-cd desktop_app
-python -m pip install -r requirements.txt
-python app.py
-```
+Read `CLOUDFLARE-DASHBOARD-ONLY-SETUP.md` for the exact setup.
 
-A fresh installation can copy `schedule.example.csv` to `schedule.csv`, but the
-app also creates an empty schedule automatically.
+## Access levels
 
-## Cloudflare Pages setup
+- Viewer key: normal user; smaller/redacted session history.
+- Owner key: owner browser/phone; larger history with owner fields.
+- Desktop write key: used only by the desktop app to upload snapshots.
+- Camera password: separate password for the live camera.
 
-For the full order, read `SETUP-MOJJSS-IR.md`.
+## GitHub safety
 
-1. Create a D1 database named `focus-studio-dashboard`.
-2. Copy `cloudflare_dashboard/wrangler.toml.example` to `wrangler.toml` and put
-   the D1 database ID in it.
-3. Initialize D1:
-
-```powershell
-cd cloudflare_dashboard
-npm install
-npx wrangler d1 execute focus-studio-dashboard --remote --file=./schema.sql
-```
-
-4. Run `GENERATE-AND-SET-SECRETS.bat`, or create three unrelated long random secrets in Cloudflare Pages:
-
-```text
-DASHBOARD_VIEWER_KEY   normal user login
-DASHBOARD_OWNER_KEY    owner login
-DESKTOP_WRITE_KEY      desktop upload only; never share with a viewer
-```
-
-5. Deploy with `DEPLOY-TIMER-MOJJSS.bat` or connect this GitHub repository to
-   Cloudflare Pages with `cloudflare_dashboard` as the project root.
-6. In Pages > Custom domains, attach `timer.mojjss.ir`.
-7. In desktop Settings > Cloud dashboard, set:
-
-```text
-Dashboard URL: https://timer.mojjss.ir
-Desktop write key: the DESKTOP_WRITE_KEY value
-```
-
-## Android camera setup
-
-Read `desktop_app/CLOUDFLARE-CAMERA-SETUP.md` and create this Tunnel route:
-
-```text
-camera.timer.mojjss.ir -> http://127.0.0.1:8788
-```
-
-Recommended desktop settings:
-
-```text
-Camera URL: https://camera.timer.mojjss.ir
-Allowed origins: https://timer.mojjss.ir, https://camera.timer.mojjss.ir
-Require Tailscale identity headers: Off
-```
-
-Use a strong camera password. The dashboard access key and camera password
-serve different purposes and should not be the same.
-
-## GitHub publishing
-
-Before the first push, verify that these files are absent from `git status`:
+Before pushing, verify that these do not appear as staged files:
 
 ```text
 desktop_app/config.json
 desktop_app/focus_history.db
 desktop_app/schedule.csv
-cloudflare_dashboard/.dev.vars
-cloudflare_dashboard/wrangler.toml
-Cloudflare Tunnel token or credential files
+cloudflare_dashboard/PRIVATE-CLOUDFLARE-KEYS.txt
+Cloudflare Tunnel tokens or credential files
 ```
-
-Pixela credentials can be supplied through `PIXELA_USERNAME`, `PIXELA_TOKEN`,
-and `PIXELA_GRAPH_ID` environment variables. Never commit the Pixela token.
