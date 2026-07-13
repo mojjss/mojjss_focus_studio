@@ -1,37 +1,112 @@
-# Python
+# Mojjss Focus Studio — secure repository exclusions
+# Put this file at the repository root and rename it to: .gitignore
+
+# -----------------------------------------------------------------------------
+# Local secrets and machine-specific configuration
+# -----------------------------------------------------------------------------
+/desktop_app/config.json
+/desktop_app/config.local.json
+/desktop_app/config.*.local.json
+
+# Environment and local-development secret files
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.sample
+**/.dev.vars
+**/.dev.vars.*
+!**/.dev.vars.example
+!**/.dev.vars.sample
+**/*.token
+**/*.secret
+**/*.secrets
+**/secrets.json
+
+# -----------------------------------------------------------------------------
+# Private application data
+# -----------------------------------------------------------------------------
+/desktop_app/focus_history.db*
+/desktop_app/schedule.csv
+/desktop_app/data/
+/desktop_app/exports/
+/desktop_app/backups/
+/desktop_app/PRIVATE_CAMERA_DIAGNOSTIC.txt
+/desktop_app/CAMERA_STACK_REPORT.txt
+/desktop_app/*.log
+/desktop_app/*.sqlite
+/desktop_app/*.sqlite3
+
+# -----------------------------------------------------------------------------
+# Cloudflare Pages / Workers local files and generated keys
+# -----------------------------------------------------------------------------
+/cloudflare_dashboard/PRIVATE-CLOUDFLARE-KEYS.txt
+/cloudflare_dashboard/*PRIVATE*.txt
+/cloudflare_dashboard/.secrets*.json
+/cloudflare_dashboard/.wrangler/
+/cloudflare_dashboard/wrangler.toml
+/cloudflare_dashboard/wrangler.json
+/cloudflare_dashboard/wrangler.jsonc
+/cloudflare_dashboard/node_modules/
+
+# Cloudflare Tunnel credentials and local connector material
+**/.cloudflared/
+**/cert.pem
+**/*.json.credentials
+**/*tunnel-credentials*.json
+**/cloudflared*.log
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+
+# -----------------------------------------------------------------------------
+# Installer backups, temporary verification repositories, and generated reports
+# -----------------------------------------------------------------------------
+**/_backup_before_v54_*/
+/.git-test-repo/
+*.bak
+*.backup
+*.old
+*.tmp
+*.temp
+
+# -----------------------------------------------------------------------------
+# Python caches, environments, tests, and build output
+# -----------------------------------------------------------------------------
 __pycache__/
 *.py[cod]
+*$py.class
 .venv/
 venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+*.egg-info/
 
-# Local application data and secrets
-desktop_app/config.json
-desktop_app/focus_history.db
-desktop_app/focus_history.db-*
-desktop_app/schedule.csv
-desktop_app/readable_data/
-desktop_app/exports/
-desktop_app/backups/
-desktop_app/*.log
-desktop_app/PRIVATE_CAMERA_DIAGNOSTIC.txt
+# -----------------------------------------------------------------------------
+# JavaScript package-manager artifacts
+# -----------------------------------------------------------------------------
+node_modules/
+.npm/
+.pnpm-store/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
-# Cloudflare / Wrangler local and secret files
-cloudflare_dashboard/node_modules/
-cloudflare_dashboard/.wrangler/
-cloudflare_dashboard/.dev.vars
-cloudflare_dashboard/wrangler.toml
-cloudflare_dashboard/.secrets*.json
-cloudflare_dashboard/*PRIVATE*.txt
-
-# Cloudflare Tunnel credentials
-*.pem
-*.crt
-*.key
-*.json.credentials
-cert.pem
-
-# Editors / OS
+# -----------------------------------------------------------------------------
+# Editors and operating-system files
+# -----------------------------------------------------------------------------
 .vscode/
 .idea/
+*.code-workspace
 .DS_Store
 Thumbs.db
+desktop.ini

@@ -351,7 +351,7 @@ header{display:flex;gap:16px;align-items:center;justify-content:space-between;ma
 }
 
 
-/* Secure camera route — v5.0 */
+/* Secure camera route — v5.4 */
 .camera-route-notice{
   display:flex;
   align-items:center;
@@ -472,7 +472,7 @@ header{display:flex;gap:16px;align-items:center;justify-content:space-between;ma
   .private-camera-viewport img{min-height:235px}
 }
 
-/* v5.0 role and pagination controls */
+/* v5.4 role and pagination controls */
 .role-badge{background:rgba(76,194,255,.12);color:var(--blue);border-color:rgba(76,194,255,.22)}
 .role-badge.owner{background:rgba(255,200,87,.14);color:var(--amber);border-color:rgba(255,200,87,.24)}
 .recent-controls{display:flex;gap:8px;justify-content:center;margin-top:14px;flex-wrap:wrap}

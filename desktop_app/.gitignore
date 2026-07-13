@@ -9,3 +9,4 @@ backups/
 PRIVATE_CAMERA_DIAGNOSTIC.txt
 __pycache__/
 *.py[cod]
+CAMERA_STACK_REPORT.txt

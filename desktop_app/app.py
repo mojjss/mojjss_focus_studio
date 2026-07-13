@@ -22,6 +22,8 @@ from PIL import Image
 from charts import AnalyticsChart
 from cloud_client import CloudDashboardPublisher
 from camera_security import derive_camera_password, has_camera_password
+from version import APP_VERSION
+
 from tailscale_camera import (
     TailscaleCameraError,
     TailscaleCameraServer,
@@ -89,7 +91,7 @@ class FocusApp(ctk.CTk):
         self.cloud_publisher: CloudDashboardPublisher | None = None
         self.camera_server: TailscaleCameraServer | None = None
 
-        self.title("mojjss live activity")
+        self.title(f"mojjss Focus Studio v{APP_VERSION}")
         self.geometry("1420x840")
         self.minsize(1180, 720)
         self.attributes("-topmost", bool(config.get("always_on_top", False)))
@@ -111,7 +113,7 @@ class FocusApp(ctk.CTk):
         )
         self.pixela_status_detail = "Pixela has not been checked yet."
         self.cloud_status_detail = "Cloud dashboard is disabled."
-        self.camera_status_detail = "Private Tailscale camera is disabled."
+        self.camera_status_detail = "Private camera is disabled."
 
         self._build_sidebar()
         self._build_content()
@@ -2993,7 +2995,7 @@ class SettingsPage(PageBase):
 
         camera = self._section(
             scroll,
-            "Private camera over Tailscale or Cloudflare Tunnel",
+            "Private camera over Cloudflare Tunnel or Tailscale",
             2,
             1,
         )
@@ -3023,7 +3025,7 @@ class SettingsPage(PageBase):
         )
         self._entry(
             camera,
-            "Allowed Tailscale users (optional, comma-separated)",
+            "Allowed Tailscale users (optional; ignored for Cloudflare-only mode)",
             "tailscale_camera_allowed_users",
             4,
         )
@@ -3157,7 +3159,7 @@ class SettingsPage(PageBase):
         camera_buttons.grid_columnconfigure((0, 1), weight=1)
         ctk.CTkButton(
             camera_buttons,
-            text="Configure Tailscale Serve",
+            text="Configure Tailscale Serve (optional)",
             command=self.save_and_configure_tailscale,
         ).grid(row=0, column=0, padx=(0, 4), sticky="ew")
         ctk.CTkButton(

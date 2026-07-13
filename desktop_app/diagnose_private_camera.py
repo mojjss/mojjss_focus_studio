@@ -13,6 +13,7 @@ from typing import Any
 
 from config_store import load_config
 from tailscale_tools import find_tailscale_cli
+from version import APP_VERSION
 
 APP_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = APP_DIR / "config.json"
@@ -89,7 +90,7 @@ def main() -> int:
         lines.append(text)
         print(text)
 
-    add("mojjss private camera diagnostic — v5.0")
+    add(f"mojjss private camera diagnostic — v{APP_VERSION}")
     add("=" * 58)
     add(f"Time: {datetime.now().astimezone().isoformat(timespec='seconds')}")
     add(f"Python: {platform.python_version()}")

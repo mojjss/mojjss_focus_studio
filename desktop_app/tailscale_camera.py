@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from camera_security import has_camera_password, verify_camera_password
+from version import APP_VERSION
 
 
 class TailscaleCameraError(RuntimeError):
@@ -373,7 +374,7 @@ class TailscaleCameraServer:
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
-            server_version = "MojjssPrivateCamera/5.0"
+            server_version = f"MojjssPrivateCamera/{APP_VERSION}"
             # HTTP/1.0 is deliberate here. The MJPEG response has no fixed
             # Content-Length, and Python requires one for every HTTP/1.1
             # response. Closing each response is more reliable behind Serve.
@@ -597,7 +598,7 @@ class TailscaleCameraServer:
                             {
                                 "ok": True,
                                 "service": "mojjss-private-camera",
-                                "version": "5.0",
+                                "version": APP_VERSION,
                                 "enabled": owner.enabled,
                             },
                         )
@@ -882,7 +883,7 @@ class TailscaleCameraServer:
         return {
             "ok": True,
             "service": "mojjss-private-camera",
-            "version": "5.0",
+            "version": APP_VERSION,
             "enabled": self.enabled,
             "password_protected": has_camera_password(self.password_config),
             "identity": identity,
