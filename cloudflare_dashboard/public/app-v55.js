@@ -238,14 +238,25 @@ function renderPeriodSummary() {
   $("sessions").textContent = summary.total_productive_sessions || 0;
 }
 function formatRecentDate(item) {
-  if (item.display_date && item.weekday) {
-    return { date: item.display_date, day: item.weekday };
+  if (item.started_at_utc) {
+    const date = new Date(item.started_at_utc);
+    if (Number.isFinite(date.getTime())) {
+      return {
+        date: date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }),
+        day: date.toLocaleDateString(undefined, { weekday: "long" }),
+        clock: date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }),
+      };
+    }
   }
-  if (!item.date) return { date: "Unknown date", day: "" };
+  if (item.display_date && item.weekday) {
+    return { date: item.display_date, day: item.weekday, clock: item.start || "" };
+  }
+  if (!item.date) return { date: "Unknown date", day: "", clock: item.start || "" };
   const date = parseLocalDate(item.date);
   return {
     date: date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }),
     day: date.toLocaleDateString(undefined, { weekday: "long" }),
+    clock: item.start || "",
   };
 }
 
@@ -269,7 +280,7 @@ function renderRecent(items) {
       <div class="time">
         <span class="session-date">${esc(when.date)}</span>
         <span class="session-day">${esc(when.day)}</span>
-        <span class="session-clock">${esc(item.start || "")}</span>
+        <span class="session-clock">${esc(when.clock || item.start || "")}</span>
       </div>
       <div>
         <div class="item-title">${esc(item.task || "Untitled session")}</div>
@@ -549,7 +560,7 @@ function updatePrivateCameraControls() {
     );
   } else if (!base) {
     setPrivateCameraMessage(
-      "Configure Cloudflare Tunnel for camera.mojjss.ir.",
+      "Configure the public Cloudflare Tunnel camera URL in the desktop app.",
       "error",
       true,
     );
@@ -865,12 +876,205 @@ for (const delay of [100, 500, 1200]) {
     updatePrivateCameraControls();
   }, delay);
 }
+
+
+async function ownerApi(path, body = null) {
+  const options = {
+    method: body === null ? "GET" : "POST",
+    cache: "no-store",
+    headers: { "X-Dashboard-Key": readKey },
+  };
+  if (body !== null) {
+    options.headers["Content-Type"] = "application/json";
+    options.body = JSON.stringify(body);
+  }
+  const response = await fetch(path, options);
+  let data = {};
+  try { data = await response.json(); } catch { data = {}; }
+  if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+  return data;
+}
+
+function ownerModeIsCountUp() {
+  return ["Flow", "Productive", "Personal"].includes($("ownerMode").value);
+}
+
+function updateOwnerModeForm() {
+  const mode = $("ownerMode").value;
+  const countUp = ownerModeIsCountUp();
+  $("ownerMinutes").disabled = countUp;
+  if (["Focus", "Flow"].includes(mode)) {
+    $("ownerFocusFlag").checked = true;
+    $("ownerFocusFlag").disabled = true;
+  } else if (["Personal", "Short Break", "Long Break"].includes(mode)) {
+    $("ownerFocusFlag").checked = false;
+    $("ownerFocusFlag").disabled = true;
+  } else {
+    $("ownerFocusFlag").disabled = false;
+  }
+  if (mode.includes("Break")) $("ownerCategory").value = "Break";
+}
+
+function renderOwnerScheduleList(items) {
+  const element = $("ownerScheduleList");
+  const ordered = (items || []).slice().sort((a, b) =>
+    `${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`)
+  );
+  if (!ordered.length) {
+    element.innerHTML = '<div class="empty">No cloud schedule events yet.</div>';
+    return;
+  }
+  element.innerHTML = ordered.slice(0, 100).map((item) => `
+    <div class="owner-schedule-row" data-event-id="${esc(item.id)}">
+      <b>${esc(item.date)}</b>
+      <span>${esc(item.start)}–${esc(item.end)}</span>
+      <div><strong>${esc(item.title)}</strong><div class="small">${esc(item.category || "General")}</div></div>
+      <div class="schedule-actions">
+        <button type="button" data-action="edit">Edit</button>
+        <button type="button" class="danger" data-action="delete">Delete</button>
+      </div>
+    </div>`).join("");
+}
+
+function resetOwnerScheduleForm() {
+  $("ownerScheduleId").value = "";
+  $("ownerScheduleRevision").value = "";
+  $("ownerScheduleDate").value = latest?.calendar?.today || isoDate(new Date());
+  $("ownerScheduleStart").value = "09:00";
+  $("ownerScheduleEnd").value = "10:00";
+  $("ownerScheduleTitle").value = "";
+  $("ownerScheduleCategory").value = "General";
+  $("ownerScheduleNotes").value = "";
+}
+
+function renderOwnerControls(data) {
+  const owner = data?.access?.role === "owner";
+  $("ownerTimerCard").classList.toggle("hidden", !owner);
+  $("ownerScheduleCard").classList.toggle("hidden", !owner);
+  if (!owner) return;
+
+  const timer = data.timer || {};
+  const active = Boolean(timer.running);
+  const paused = Boolean(timer.paused);
+  $("ownerTimerState").textContent = active
+    ? (paused ? "Paused" : `Running · ${timer.source || "cloud"}`)
+    : "Cloud timer idle";
+  $("ownerTimerState").className = active ? "badge" : "badge offline";
+  $("ownerStartButton").disabled = active;
+  $("ownerPauseButton").disabled = !active || paused;
+  $("ownerResumeButton").disabled = !active || !paused;
+  $("ownerFinishButton").disabled = !active;
+  $("ownerCancelButton").disabled = !active;
+  renderOwnerScheduleList(data.schedule_events || []);
+  if (!$("ownerScheduleDate").value) resetOwnerScheduleForm();
+}
+
+async function runOwnerTimerAction(action) {
+  $("ownerTimerMessage").textContent = `${action}…`;
+  try {
+    await ownerApi("/api/control/timer", { action });
+    $("ownerTimerMessage").textContent = `Timer ${action} applied.`;
+    await refresh(false);
+  } catch (error) {
+    $("ownerTimerMessage").textContent = String(error.message || error);
+  }
+}
+
+$("ownerMode").addEventListener("change", updateOwnerModeForm);
+updateOwnerModeForm();
+
+$("ownerTimerForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  $("ownerTimerMessage").textContent = "Starting timer…";
+  const countUp = ownerModeIsCountUp();
+  try {
+    await ownerApi("/api/control/timer", {
+      action: "start",
+      task: $("ownerTask").value.trim(),
+      category: $("ownerCategory").value.trim(),
+      mode: $("ownerMode").value,
+      duration_seconds: countUp ? 0 : Number($("ownerMinutes").value) * 60,
+      counts_toward_focus: $("ownerFocusFlag").checked,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+    });
+    $("ownerTimerMessage").textContent = "Timer started in the cloud.";
+    await refresh(false);
+  } catch (error) {
+    $("ownerTimerMessage").textContent = String(error.message || error);
+  }
+});
+
+$("ownerPauseButton").onclick = () => runOwnerTimerAction("pause");
+$("ownerResumeButton").onclick = () => runOwnerTimerAction("resume");
+$("ownerFinishButton").onclick = () => runOwnerTimerAction("finish");
+$("ownerCancelButton").onclick = () => runOwnerTimerAction("cancel");
+
+$("ownerScheduleNew").onclick = resetOwnerScheduleForm;
+$("ownerScheduleCancelEdit").onclick = resetOwnerScheduleForm;
+
+$("ownerScheduleForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const body = {
+    action: "upsert",
+    id: $("ownerScheduleId").value || undefined,
+    base_revision: $("ownerScheduleRevision").value
+      ? Number($("ownerScheduleRevision").value)
+      : undefined,
+    date: $("ownerScheduleDate").value,
+    start: $("ownerScheduleStart").value,
+    end: $("ownerScheduleEnd").value,
+    title: $("ownerScheduleTitle").value.trim(),
+    category: $("ownerScheduleCategory").value.trim(),
+    notes: $("ownerScheduleNotes").value.trim(),
+  };
+  $("ownerScheduleMessage").textContent = "Saving event…";
+  try {
+    await ownerApi("/api/control/schedule", body);
+    $("ownerScheduleMessage").textContent = "Schedule saved.";
+    resetOwnerScheduleForm();
+    await refresh(false);
+  } catch (error) {
+    $("ownerScheduleMessage").textContent = String(error.message || error);
+  }
+});
+
+$("ownerScheduleList").addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-action]");
+  const row = event.target.closest("[data-event-id]");
+  if (!button || !row || !latest) return;
+  const item = (latest.schedule_events || []).find((value) => value.id === row.dataset.eventId);
+  if (!item) return;
+  if (button.dataset.action === "edit") {
+    $("ownerScheduleId").value = item.id || "";
+    $("ownerScheduleRevision").value = item.revision || "";
+    $("ownerScheduleDate").value = item.date || "";
+    $("ownerScheduleStart").value = item.start || "";
+    $("ownerScheduleEnd").value = item.end || "";
+    $("ownerScheduleTitle").value = item.title || "";
+    $("ownerScheduleCategory").value = item.category || "General";
+    $("ownerScheduleNotes").value = item.notes || "";
+    $("ownerScheduleTitle").focus();
+    return;
+  }
+  if (!confirm(`Delete “${item.title}”?`)) return;
+  try {
+    await ownerApi("/api/control/schedule", {
+      action: "delete", id: item.id, base_revision: item.revision,
+    });
+    $("ownerScheduleMessage").textContent = "Event deleted.";
+    await refresh(false);
+  } catch (error) {
+    $("ownerScheduleMessage").textContent = String(error.message || error);
+  }
+});
+
 function render(data) {
   latest = data;
   fetchedAt = performance.now();
   const role = data.access?.role === "owner" ? "owner" : "viewer";
   $("accessRole").textContent = role === "owner" ? "Owner mode" : "Viewer mode";
   $("accessRole").className = role === "owner" ? "badge role-badge owner" : "badge role-badge";
+  renderOwnerControls(data);
 
   if (!data.has_data) {
     $("task").textContent = "No desktop snapshot yet";
@@ -894,9 +1098,11 @@ function render(data) {
   $("focusFlag").textContent = timer.counts_toward_focus
     ? "Counts as focus"
     : "Not counting as focus";
-  $("timerStatus").textContent = cloud.desktop_online
-    ? (timer.status || "Ready")
-    : `Last desktop update ${ageText(cloud.age_seconds)}`;
+  $("timerStatus").textContent = timer.running
+    ? (timer.status || "Running in cloud")
+    : cloud.desktop_online
+      ? (timer.status || "Ready")
+      : `Last desktop update ${ageText(cloud.age_seconds)}`;
 
   renderPeriodSummary();
   renderSchedule();
@@ -925,10 +1131,9 @@ function animate() {
 
   if (latest?.has_data) {
     const timer = latest.timer || {};
-    const cloudOnline = Boolean(latest.cloud?.desktop_online);
     let seconds = Number(timer.display_seconds) || 0;
 
-    if (timer.running && !timer.paused && cloudOnline) {
+    if (timer.running && !timer.paused) {
       const delta = (performance.now() - fetchedAt) / 1000;
       const countUp = ["Flow", "Productive", "Personal"].includes(timer.mode);
       seconds = countUp ? seconds + delta : seconds - delta;
@@ -938,7 +1143,7 @@ function animate() {
     const duration = Math.max(1, Number(timer.duration_seconds) || 1);
     const elapsed =
       Math.max(0, Number(timer.elapsed_seconds) || 0) +
-      (timer.running && !timer.paused && cloudOnline
+      (timer.running && !timer.paused
         ? (performance.now() - fetchedAt) / 1000
         : 0);
 

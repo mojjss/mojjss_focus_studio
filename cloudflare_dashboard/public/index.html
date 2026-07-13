@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#0b1220">
 <meta name="robots" content="noindex,nofollow">
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="stylesheet" href="/style-v54.css?v=5.4">
+<link rel="stylesheet" href="/style-v55.css?v=5.5">
 <title>mojjss live activity</title>
 </head>
 <body>
@@ -58,6 +58,36 @@
     </div>
   </section>
 
+
+
+  <section id="ownerTimerCard" class="card owner-only hidden">
+    <div class="section-heading">
+      <div>
+        <div class="label">OWNER CONTROL</div>
+        <h2>Start and control a timer</h2>
+      </div>
+      <span id="ownerTimerState" class="badge offline">Cloud timer idle</span>
+    </div>
+    <form id="ownerTimerForm" class="owner-form">
+      <label>Task<input id="ownerTask" maxlength="200" placeholder="What are you working on?" required></label>
+      <label>Category<input id="ownerCategory" maxlength="100" value="Research"></label>
+      <label>Mode<select id="ownerMode">
+        <option>Focus</option><option>Flow</option><option>Productive</option><option>Personal</option>
+        <option>Short Break</option><option>Long Break</option>
+      </select></label>
+      <label>Minutes<input id="ownerMinutes" type="number" min="1" max="600" value="25"></label>
+      <label class="owner-check"><input id="ownerFocusFlag" type="checkbox" checked> Count toward focused time</label>
+      <button id="ownerStartButton" type="submit">Start from this device</button>
+    </form>
+    <div class="owner-actions">
+      <button id="ownerPauseButton" type="button">Pause</button>
+      <button id="ownerResumeButton" type="button">Resume</button>
+      <button id="ownerFinishButton" type="button">Complete</button>
+      <button id="ownerCancelButton" class="danger" type="button">Cancel</button>
+    </div>
+    <div id="ownerTimerMessage" class="small owner-message">The timer runs in Cloudflare even when the laptop is off.</div>
+  </section>
+
   <section class="card">
     <div class="section-heading">
       <div>
@@ -89,11 +119,8 @@
 
   <div id="cameraRouteNotice" class="camera-route-notice">
     <div>
-      <strong>No Tailscale app is required for the Cloudflare route.</strong>
-      <span>
-        The camera is reached at camera.mojjss.ir through Cloudflare Tunnel.
-        The desktop app must be running and the camera permission must be enabled.
-      </span>
+      <strong>Secure camera access is available directly in your browser.</strong>
+      <span>The desktop app and Cloudflare Tunnel must be online, and camera access must be enabled.</span>
     </div>
     <button id="cameraRetryButton" type="button">Retry camera connection</button>
   </div>
@@ -220,6 +247,31 @@
     <div id="schedule" class="empty">No scheduled items.</div>
   </section>
 
+
+
+  <section id="ownerScheduleCard" class="card owner-only hidden">
+    <div class="section-heading">
+      <div><div class="label">OWNER CONTROL</div><h2>Manage schedule</h2></div>
+      <button id="ownerScheduleNew" type="button">New event</button>
+    </div>
+    <form id="ownerScheduleForm" class="owner-form schedule-owner-form">
+      <input id="ownerScheduleId" type="hidden">
+      <input id="ownerScheduleRevision" type="hidden">
+      <label>Date<input id="ownerScheduleDate" type="date" required></label>
+      <label>Start<input id="ownerScheduleStart" type="time" required></label>
+      <label>End<input id="ownerScheduleEnd" type="time" required></label>
+      <label>Title<input id="ownerScheduleTitle" maxlength="200" required></label>
+      <label>Category<input id="ownerScheduleCategory" maxlength="100" value="General"></label>
+      <label class="wide">Notes<textarea id="ownerScheduleNotes" maxlength="2000" rows="2"></textarea></label>
+      <div class="owner-actions wide">
+        <button type="submit">Save event</button>
+        <button id="ownerScheduleCancelEdit" type="button">Clear form</button>
+      </div>
+    </form>
+    <div id="ownerScheduleMessage" class="small owner-message"></div>
+    <div id="ownerScheduleList" class="owner-schedule-list"></div>
+  </section>
+
   <section class="card pixela-wide-card">
     <div class="section-heading">
       <div>
@@ -241,9 +293,9 @@
 </div>
 
 <div class="footer">
-  mojjss Focus Studio v5.4 · timer.mojjss.ir · github.com/mojjss
+  mojjss Focus Studio v5.5 · cloud/local two-way sync
 </div>
 </div>
-<script src="/app-v54.js?v=5.4" defer></script>
+<script src="/app-v55.js?v=5.5" defer></script>
 </body>
 </html>

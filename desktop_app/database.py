@@ -4,6 +4,7 @@ import csv
 import hashlib
 import shutil
 import sqlite3
+import uuid
 from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -67,7 +68,8 @@ class SessionStore:
                     synced INTEGER NOT NULL DEFAULT 0,
                     fingerprint TEXT UNIQUE,
                     created_at TEXT NOT NULL DEFAULT '',
-                    updated_at TEXT NOT NULL DEFAULT ''
+                    updated_at TEXT NOT NULL DEFAULT '',
+                    sync_id TEXT
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_sessions_local_date
@@ -98,6 +100,10 @@ class SessionStore:
                 "CREATE INDEX IF NOT EXISTS idx_sessions_focus_flag "
                 "ON sessions(counts_toward_focus)"
             )
+            db.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_sync_id "
+                "ON sessions(sync_id) WHERE sync_id IS NOT NULL AND sync_id != ''"
+            )
         self.export_readable_copy()
 
     @staticmethod
@@ -121,6 +127,7 @@ class SessionStore:
             "fingerprint": "TEXT",
             "created_at": "TEXT NOT NULL DEFAULT ''",
             "updated_at": "TEXT NOT NULL DEFAULT ''",
+            "sync_id": "TEXT",
         }
         added_focus_flag = False
         for name, definition in additions.items():
@@ -153,6 +160,27 @@ class SessionStore:
             "UPDATE sessions SET updated_at=? WHERE updated_at='' OR updated_at IS NULL",
             (now,),
         )
+        db.execute(
+            "UPDATE sessions SET sync_id=fingerprint "
+            "WHERE (sync_id IS NULL OR sync_id='') AND fingerprint IS NOT NULL"
+        )
+        missing = db.execute(
+            "SELECT * FROM sessions WHERE sync_id IS NULL OR sync_id=''"
+        ).fetchall()
+        for row in missing:
+            values = dict(row)
+            fingerprint = str(values.get("fingerprint") or self._fingerprint(values))
+            sync_id = fingerprint or uuid.uuid4().hex
+            try:
+                db.execute(
+                    "UPDATE sessions SET fingerprint=?, sync_id=? WHERE id=?",
+                    (fingerprint, sync_id, int(row["id"])),
+                )
+            except sqlite3.IntegrityError:
+                db.execute(
+                    "UPDATE sessions SET sync_id=? WHERE id=?",
+                    (uuid.uuid4().hex, int(row["id"])),
+                )
 
     @staticmethod
     def _fingerprint(values: dict[str, Any]) -> str:
@@ -185,6 +213,7 @@ class SessionStore:
         notes: str = "",
         completed: bool = True,
         source: str = "app",
+        sync_id: str | None = None,
     ) -> int:
         if started_at.tzinfo is None:
             started_at = started_at.replace(tzinfo=self.zone)
@@ -211,6 +240,7 @@ class SessionStore:
             "synced": 0 if focus_flag else 1,
             "created_at": now,
             "updated_at": now,
+            "sync_id": (sync_id or uuid.uuid4().hex).strip(),
         }
         values["fingerprint"] = self._fingerprint(values)
 
@@ -221,12 +251,12 @@ class SessionStore:
                     task, category, mode, counts_toward_focus,
                     started_at_utc, ended_at_utc, local_date,
                     planned_minutes, minutes, notes, completed,
-                    source, synced, fingerprint, created_at, updated_at
+                    source, synced, fingerprint, created_at, updated_at, sync_id
                 ) VALUES(
                     :task, :category, :mode, :counts_toward_focus,
                     :started_at_utc, :ended_at_utc, :local_date,
                     :planned_minutes, :minutes, :notes, :completed,
-                    :source, :synced, :fingerprint, :created_at, :updated_at
+                    :source, :synced, :fingerprint, :created_at, :updated_at, :sync_id
                 )
                 """,
                 values,
@@ -256,6 +286,7 @@ class SessionStore:
                 )
                 values.setdefault("source", "csv-import")
                 values["fingerprint"] = self._fingerprint(values)
+                values.setdefault("sync_id", values["fingerprint"])
                 try:
                     db.execute(
                         """
@@ -263,12 +294,12 @@ class SessionStore:
                             task, category, mode, counts_toward_focus,
                             started_at_utc, ended_at_utc, local_date,
                             planned_minutes, minutes, notes, completed,
-                            source, synced, fingerprint, created_at, updated_at
+                            source, synced, fingerprint, created_at, updated_at, sync_id
                         ) VALUES(
                             :task, :category, :mode, :counts_toward_focus,
                             :started_at_utc, :ended_at_utc, :local_date,
                             :planned_minutes, :minutes, :notes, :completed,
-                            :source, :synced, :fingerprint, :created_at, :updated_at
+                            :source, :synced, :fingerprint, :created_at, :updated_at, :sync_id
                         )
                         """,
                         values,
@@ -279,6 +310,118 @@ class SessionStore:
         if inserted:
             self.export_readable_copy()
         return inserted, skipped
+
+
+
+    def sessions_for_cloud(
+        self,
+        limit: int = 750,
+        *,
+        updated_after: str | None = None,
+    ) -> list[dict[str, Any]]:
+        where = "completed=1 AND sync_id IS NOT NULL AND sync_id != ''"
+        parameters: list[Any] = []
+        if updated_after:
+            where += " AND julianday(updated_at) > julianday(?)"
+            parameters.append(str(updated_after))
+        parameters.append(max(1, int(limit)))
+        with self.connect() as db:
+            rows = db.execute(
+                f"""
+                SELECT sync_id, task, category, mode, counts_toward_focus,
+                       started_at_utc, ended_at_utc, local_date,
+                       planned_minutes, minutes, notes, source, updated_at
+                FROM sessions
+                WHERE {where}
+                ORDER BY ended_at_utc DESC
+                LIMIT ?
+                """,
+                parameters,
+            ).fetchall()
+        return [
+            {
+                "id": str(row["sync_id"]),
+                "task": str(row["task"]),
+                "category": str(row["category"]),
+                "mode": str(row["mode"]),
+                "counts_toward_focus": bool(row["counts_toward_focus"]),
+                "started_at_utc": str(row["started_at_utc"]),
+                "ended_at_utc": str(row["ended_at_utc"]),
+                "local_date": str(row["local_date"]),
+                "planned_minutes": int(row["planned_minutes"]),
+                "minutes": int(row["minutes"]),
+                "notes": str(row["notes"] or ""),
+                "source": str(row["source"] or "desktop"),
+                "updated_at": str(row["updated_at"] or ""),
+            }
+            for row in rows
+        ]
+
+    def import_cloud_sessions(self, rows: list[dict[str, Any]]) -> int:
+        inserted = 0
+        with self.connect() as db:
+            for raw in rows:
+                sync_id = str(raw.get("id") or raw.get("sync_id") or "").strip()
+                if not sync_id:
+                    continue
+                exists = db.execute(
+                    "SELECT 1 FROM sessions WHERE sync_id=?", (sync_id,)
+                ).fetchone()
+                if exists:
+                    continue
+                try:
+                    started_at = datetime.fromisoformat(str(raw["started_at_utc"]))
+                    ended_at = datetime.fromisoformat(str(raw["ended_at_utc"]))
+                except (KeyError, ValueError, TypeError):
+                    continue
+                if started_at.tzinfo is None:
+                    started_at = started_at.replace(tzinfo=timezone.utc)
+                if ended_at.tzinfo is None:
+                    ended_at = ended_at.replace(tzinfo=timezone.utc)
+                focus_flag = 1 if bool(raw.get("counts_toward_focus")) else 0
+                now = datetime.now(timezone.utc).isoformat()
+                values = {
+                    "task": str(raw.get("task") or "Untitled session"),
+                    "category": str(raw.get("category") or "General"),
+                    "mode": str(raw.get("mode") or "Focus"),
+                    "counts_toward_focus": focus_flag,
+                    "started_at_utc": started_at.astimezone(timezone.utc).isoformat(),
+                    "ended_at_utc": ended_at.astimezone(timezone.utc).isoformat(),
+                    "local_date": str(raw.get("local_date") or ended_at.astimezone(self.zone).strftime("%Y%m%d")).replace("-", ""),
+                    "planned_minutes": max(0, int(raw.get("planned_minutes") or 0)),
+                    "minutes": max(1, int(raw.get("minutes") or 1)),
+                    "notes": str(raw.get("notes") or ""),
+                    "completed": 1,
+                    "source": str(raw.get("source") or "cloud"),
+                    "synced": 0 if focus_flag else 1,
+                    "created_at": str(raw.get("updated_at") or now),
+                    "updated_at": str(raw.get("updated_at") or now),
+                    "sync_id": sync_id,
+                }
+                values["fingerprint"] = self._fingerprint(values)
+                try:
+                    db.execute(
+                        """
+                        INSERT INTO sessions(
+                            task, category, mode, counts_toward_focus,
+                            started_at_utc, ended_at_utc, local_date,
+                            planned_minutes, minutes, notes, completed,
+                            source, synced, fingerprint, created_at, updated_at, sync_id
+                        ) VALUES(
+                            :task, :category, :mode, :counts_toward_focus,
+                            :started_at_utc, :ended_at_utc, :local_date,
+                            :planned_minutes, :minutes, :notes, :completed,
+                            :source, :synced, :fingerprint, :created_at, :updated_at, :sync_id
+                        )
+                        """,
+                        values,
+                    )
+                    inserted += 1
+                except sqlite3.IntegrityError:
+                    continue
+        if inserted:
+            self.export_readable_copy()
+        return inserted
 
     def _session_filter_sql(
         self,

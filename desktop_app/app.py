@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import threading
+import uuid
 import time
 import webbrowser
 from dataclasses import dataclass
@@ -21,6 +22,7 @@ from PIL import Image
 
 from charts import AnalyticsChart
 from cloud_client import CloudDashboardPublisher
+from cloud_sync import CloudStateSynchronizer
 from camera_security import derive_camera_password, has_camera_password
 from version import APP_VERSION
 
@@ -52,6 +54,7 @@ CONFIG_PATH = APP_DIR / "config.json"
 DB_PATH = APP_DIR / "focus_history.db"
 READABLE_DIR = APP_DIR / "data" / "readable"
 EXPORT_DIR = APP_DIR / "exports"
+TIMER_STATE_PATH = APP_DIR / "timer_state.json"
 EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -65,6 +68,10 @@ class TimerState:
     paused: bool = False
     started_at: datetime | None = None
     monotonic_anchor: float | None = None
+    session_id: str = ""
+    revision: int = 0
+    updated_at: datetime | None = None
+    sync_status: str = "idle"
 
 
 class FocusApp(ctk.CTk):
@@ -89,6 +96,9 @@ class FocusApp(ctk.CTk):
         self._monitor_graph_cache: bytes | None = None
         self._monitor_graph_cache_at = 0.0
         self.cloud_publisher: CloudDashboardPublisher | None = None
+        self.cloud_syncer: CloudStateSynchronizer | None = None
+        self._cloud_client_since: str | None = None
+        self._cloud_server_since: str | None = None
         self.camera_server: TailscaleCameraServer | None = None
 
         self.title(f"mojjss Focus Studio v{APP_VERSION}")
@@ -120,8 +130,10 @@ class FocusApp(ctk.CTk):
         self.show_page("Timer")
         self._start_monitor_server()
         self._configure_cloud_publisher()
+        self._configure_cloud_syncer()
         self._configure_remote_camera()
         self.after(1200, self._cloud_dashboard_tick)
+        self.after(1800, self._cloud_sync_tick)
         self.after(700, self.background_connection_check)
 
     def publish_monitor_snapshot(self, values: dict[str, Any]) -> None:
@@ -171,6 +183,8 @@ class FocusApp(ctk.CTk):
             recent.append(
                 {
                     "id": int(row["id"]),
+                    "sync_id": str(row["sync_id"] or ""),
+                    "started_at_utc": str(row["started_at_utc"]),
                     "date": iso_date,
                     "display_date": display_date,
                     "weekday": weekday,
@@ -335,6 +349,100 @@ class FocusApp(ctk.CTk):
 
         self.cloud_status_var.set("Cloud dashboard: ready to upload")
 
+    def _configure_cloud_syncer(self) -> None:
+        if self.cloud_syncer is not None:
+            self.cloud_syncer.stop()
+            self.cloud_syncer = None
+        if not bool(self.config_data.get("cloud_dashboard_enabled", False)):
+            return
+        if not bool(self.config_data.get("cloud_two_way_sync_enabled", True)):
+            return
+        url = str(self.config_data.get("cloud_dashboard_url", "")).strip()
+        write_key = str(self.config_data.get("cloud_desktop_write_key", "")).strip()
+        if not url or not write_key:
+            return
+        self.cloud_syncer = CloudStateSynchronizer(
+            url,
+            write_key,
+            status_callback=self._set_cloud_status_threadsafe,
+            result_callback=self._handle_cloud_sync_result_threadsafe,
+        )
+        if not self.cloud_syncer.configured:
+            self.cloud_syncer.stop()
+            self.cloud_syncer = None
+
+    def _handle_cloud_sync_result_threadsafe(self, result: dict[str, Any]) -> None:
+        try:
+            self.after(0, lambda: self._apply_cloud_sync_result(result))
+        except Exception:
+            pass
+
+    def _apply_cloud_sync_result(self, result: dict[str, Any]) -> None:
+        echoed_client_time = str(result.get("client_sent_at") or "").strip()
+        server_time = str(result.get("server_time") or "").strip()
+        if echoed_client_time:
+            self._cloud_client_since = echoed_client_time
+        if server_time:
+            self._cloud_server_since = server_time
+        schedule_changed = self.schedule_store.merge_remote(result.get("schedule", []))
+        sessions_added = self.store.import_cloud_sessions(result.get("sessions", []))
+        timer_page = self.pages.get("Timer")
+        timer_changed = False
+        if isinstance(timer_page, TimerPage):
+            timer_changed = timer_page.apply_cloud_timer(
+                result.get("timer") or {},
+                conflict=bool(result.get("timer_conflict", False)),
+            )
+        if schedule_changed or sessions_added or timer_changed:
+            self.refresh_data_views()
+            self.publish_cloud_snapshot_now()
+        if result.get("timer_conflict"):
+            self.local_status_var.set(
+                "Cloud timer conflict: local and phone timers were both preserved"
+            )
+        elif sessions_added:
+            self.local_status_var.set(
+                f"Imported {sessions_added} cloud session(s)"
+            )
+            if self.pixela.configured:
+                self.sync_now()
+
+    def _cloud_sync_payload(self) -> dict[str, Any]:
+        timer_page = self.pages.get("Timer")
+        timer = (
+            timer_page.cloud_sync_payload()
+            if isinstance(timer_page, TimerPage)
+            else {}
+        )
+        client_sent_at = datetime.now(timezone.utc).isoformat()
+        return {
+            "device_id": str(self.config_data.get("cloud_device_id", "desktop")),
+            "app_version": APP_VERSION,
+            "client_sent_at": client_sent_at,
+            "server_since": self._cloud_server_since,
+            "timer": timer,
+            "schedule": self.schedule_store.all_sync_rows(
+                updated_after=self._cloud_client_since,
+            ),
+            "sessions": self.store.sessions_for_cloud(
+                limit=750,
+                updated_after=self._cloud_client_since,
+            ),
+        }
+
+    def _cloud_sync_tick(self) -> None:
+        timer_page = self.pages.get("Timer")
+        running = isinstance(timer_page, TimerPage) and timer_page.state.running
+        if self.cloud_syncer is not None:
+            self.cloud_syncer.submit(self._cloud_sync_payload())
+        key = "cloud_sync_running_seconds" if running else "cloud_sync_idle_seconds"
+        default = 5 if running else 30
+        try:
+            seconds = max(3, int(self.config_data.get(key, default)))
+        except (TypeError, ValueError):
+            seconds = default
+        self.after(seconds * 1000, self._cloud_sync_tick)
+
     def _cloud_dashboard_tick(self) -> None:
         timer_page = self.pages.get("Timer")
         running = (
@@ -405,13 +513,9 @@ class FocusApp(ctk.CTk):
         # newline-separated values are both supported.
         add_values(self.config_data.get("tailscale_camera_allowed_origin", ""))
 
-        # Also allow the configured cloud dashboard plus the v5 production
-        # hostnames. The old Pages hostname remains allowed for a smooth
-        # migration from earlier releases.
+        # Also allow the configured cloud dashboard. No third-party origin is
+        # trusted automatically; each self-hosted installation must list its own.
         add_values(self.config_data.get("cloud_dashboard_url", ""))
-        add_values("https://timer.mojjss.ir")
-        add_values("https://camera.mojjss.ir")
-        add_values("https://focus-studio-dashboard.pages.dev")
 
         return ", ".join(origins)
 
@@ -683,6 +787,7 @@ class FocusApp(ctk.CTk):
 
     def test_cloud_dashboard(self) -> None:
         self._configure_cloud_publisher()
+        self._configure_cloud_syncer()
         if self.cloud_publisher is None:
             messagebox.showerror(
                 "Cloud dashboard",
@@ -994,14 +1099,18 @@ class FocusApp(ctk.CTk):
         if isinstance(timer_page, TimerPage) and timer_page.state.running:
             close = messagebox.askyesno(
                 "Timer running",
-                "A timer is active. Close without logging the unfinished time?",
+                "A timer is active. Close the app? The timer state will be preserved and can resume when the app opens again.",
             )
             if not close:
                 return
+            timer_page._update_clock()
+            timer_page._persist_timer_state()
         if self._monitor_server is not None:
             self._monitor_server.stop()
         if self.cloud_publisher is not None:
             self.cloud_publisher.stop()
+        if self.cloud_syncer is not None:
+            self.cloud_syncer.stop()
         if self.camera_server is not None:
             self.camera_server.stop()
         self.destroy()
@@ -1054,8 +1163,10 @@ class TimerPage(PageBase):
         self.today_var = ctk.StringVar(value="")
         self.cycle_var = ctk.StringVar(value="")
         self.custom_minutes_var = ctk.StringVar(value=str(app.config_data["focus_minutes"]))
+        self._last_timer_persist_at = 0.0
 
         self._build()
+        self._restore_timer_state()
         self.refresh()
         self.after(200, self.tick)
 
@@ -1257,6 +1368,182 @@ class TimerPage(PageBase):
         total_cycle = max(1, int(self.app.config_data.get("sessions_before_long_break", 4)))
         self.cycle_var.set(f"{self.completed_in_cycle % total_cycle} of {total_cycle} focus blocks complete")
 
+    def _touch_timer(self, status: str | None = None) -> None:
+        if status is not None:
+            self.state.sync_status = status
+        self.state.revision += 1
+        self.state.updated_at = datetime.now(timezone.utc)
+        self._persist_timer_state()
+
+    def _persist_timer_state(self) -> None:
+        try:
+            payload = self.cloud_sync_payload(update_clock=False)
+            payload["saved_at"] = datetime.now(timezone.utc).isoformat()
+            TIMER_STATE_PATH.write_text(
+                json.dumps(payload, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+
+    def _restore_timer_state(self) -> None:
+        if not TIMER_STATE_PATH.exists():
+            return
+        try:
+            raw = json.loads(TIMER_STATE_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        if not isinstance(raw, dict) or not raw.get("session_id"):
+            return
+        status = str(raw.get("status") or "idle")
+        if status not in {"running", "paused"}:
+            return
+        mode = str(raw.get("mode") or "Focus")
+        self.state.session_id = str(raw.get("session_id"))
+        self.state.revision = int(raw.get("revision") or 0)
+        self.state.sync_status = status
+        self.state.mode = mode
+        self.state.duration_seconds = max(0, int(raw.get("duration_seconds") or 0))
+        self.state.elapsed_seconds = max(0, int(raw.get("elapsed_seconds") or 0))
+        self.state.remaining_seconds = max(0, int(raw.get("remaining_seconds") or 0))
+        self.state.running = True
+        self.state.paused = status == "paused"
+        try:
+            self.state.started_at = datetime.fromisoformat(str(raw.get("started_at")))
+            if self.state.started_at.tzinfo is None:
+                self.state.started_at = self.state.started_at.replace(tzinfo=self.app.zone)
+        except (TypeError, ValueError):
+            self.state.started_at = datetime.now(self.app.zone) - timedelta(
+                seconds=self.state.elapsed_seconds
+            )
+        try:
+            updated_at = datetime.fromisoformat(str(raw.get("updated_at")))
+            if updated_at.tzinfo is None:
+                updated_at = updated_at.replace(tzinfo=timezone.utc)
+            self.state.updated_at = updated_at.astimezone(timezone.utc)
+        except (TypeError, ValueError):
+            self.state.updated_at = datetime.now(timezone.utc)
+        try:
+            saved_at = datetime.fromisoformat(str(raw.get("saved_at") or raw.get("updated_at")))
+            if saved_at.tzinfo is None:
+                saved_at = saved_at.replace(tzinfo=timezone.utc)
+            if status == "running":
+                offline = max(0, int((datetime.now(timezone.utc) - saved_at.astimezone(timezone.utc)).total_seconds()))
+                self.state.elapsed_seconds += offline
+                if mode not in {"Flow", "Productive", "Personal"}:
+                    self.state.remaining_seconds = max(
+                        0, self.state.duration_seconds - self.state.elapsed_seconds
+                    )
+        except (TypeError, ValueError):
+            pass
+        self.state.monotonic_anchor = time.monotonic() if not self.state.paused else None
+        self.task_var.set(str(raw.get("task") or ""))
+        self.category_var.set(str(raw.get("category") or "Research"))
+        self.mode_var.set(mode)
+        self.focus_sync_var.set(bool(raw.get("counts_toward_focus")))
+        self.start_button.configure(text="Resume" if self.state.paused else "Pause")
+        self.timer_status_var.set("Paused" if self.state.paused else f"{mode} restored")
+        self._refresh_timer_display()
+
+    def _refresh_timer_display(self) -> None:
+        count_up = self.state.mode in {"Flow", "Productive", "Personal"}
+        display = self.state.elapsed_seconds if count_up else self.state.remaining_seconds
+        self.time_var.set(self.format_seconds(display))
+        if count_up:
+            self.progress.set(0)
+        else:
+            duration = max(1, self.state.duration_seconds)
+            self.progress.set(min(1.0, self.state.elapsed_seconds / duration))
+
+    def cloud_sync_payload(self, *, update_clock: bool = True) -> dict[str, Any]:
+        if update_clock and self.state.running and not self.state.paused:
+            self._update_clock()
+        status = self.state.sync_status
+        if self.state.running:
+            status = "paused" if self.state.paused else "running"
+        return {
+            "session_id": self.state.session_id,
+            "revision": self.state.revision,
+            "status": status,
+            "running": self.state.running,
+            "paused": self.state.paused,
+            "task": self.task_var.get().strip(),
+            "category": self.category_var.get().strip(),
+            "mode": self.state.mode,
+            "counts_toward_focus": bool(self.focus_sync_var.get()),
+            "duration_seconds": int(self.state.duration_seconds),
+            "elapsed_seconds": int(self.state.elapsed_seconds),
+            "remaining_seconds": int(self.state.remaining_seconds),
+            "started_at": self.state.started_at.astimezone(timezone.utc).isoformat()
+                if self.state.started_at else None,
+            "running_since": datetime.now(timezone.utc).isoformat()
+                if self.state.running and not self.state.paused else None,
+            "updated_at": (self.state.updated_at or datetime.now(timezone.utc)).isoformat(),
+            "timezone": str(self.app.config_data.get("timezone", "UTC")),
+        }
+
+    def apply_cloud_timer(self, remote: dict[str, Any], *, conflict: bool = False) -> bool:
+        if conflict or not isinstance(remote, dict):
+            return False
+        remote_id = str(remote.get("session_id") or "")
+        remote_status = str(remote.get("status") or "idle")
+        remote_active = remote_status in {"running", "paused"}
+        same = bool(remote_id and remote_id == self.state.session_id)
+        if self.state.running and remote_active and not same:
+            return False
+        if self.state.running and same and str(remote.get("source")) != "web":
+            return False
+        if not remote_id:
+            return False
+
+        if remote_active:
+            self.state.session_id = remote_id
+            self.state.revision = int(remote.get("revision") or 0)
+            self.state.sync_status = remote_status
+            self.state.mode = str(remote.get("mode") or "Focus")
+            self.state.duration_seconds = max(0, int(remote.get("duration_seconds") or 0))
+            self.state.elapsed_seconds = max(0, int(remote.get("elapsed_seconds") or 0))
+            self.state.remaining_seconds = max(0, int(remote.get("remaining_seconds") or 0))
+            self.state.running = True
+            self.state.paused = remote_status == "paused"
+            try:
+                started = datetime.fromisoformat(str(remote.get("started_at")))
+                self.state.started_at = started.astimezone(self.app.zone)
+            except (TypeError, ValueError):
+                self.state.started_at = datetime.now(self.app.zone) - timedelta(
+                    seconds=self.state.elapsed_seconds
+                )
+            self.state.monotonic_anchor = time.monotonic() if not self.state.paused else None
+            self.task_var.set(str(remote.get("task") or ""))
+            self.category_var.set(str(remote.get("category") or "Research"))
+            self.mode_var.set(self.state.mode)
+            self.focus_sync_var.set(bool(remote.get("counts_toward_focus")))
+            self.start_button.configure(text="Resume" if self.state.paused else "Pause")
+            self.timer_status_var.set(
+                "Paused from phone" if self.state.paused else "Running from phone"
+            )
+            self._refresh_timer_display()
+            self._touch_timer(remote_status)
+            return True
+
+        if same and remote_status in {"completed", "canceled"}:
+            self.state.running = False
+            self.state.paused = False
+            self.state.monotonic_anchor = None
+            self.state.sync_status = remote_status
+            self.start_button.configure(text="Start")
+            self.timer_status_var.set(
+                "Completed from phone" if remote_status == "completed" else "Canceled from phone"
+            )
+            self._refresh_timer_display()
+            self._persist_timer_state()
+            return True
+        return False
+
+    def _queue_two_way_sync(self) -> None:
+        if self.app.cloud_syncer is not None:
+            self.app.cloud_syncer.submit(self.app._cloud_sync_payload())
+
     def set_duration(self, minutes: int) -> None:
         if self.state.running:
             messagebox.showinfo("Timer active", "Reset or finish the current timer before changing its length.")
@@ -1268,6 +1555,7 @@ class TimerPage(PageBase):
         self.time_var.set(self.format_seconds(self.state.remaining_seconds))
         self.progress.set(0)
         self.timer_status_var.set(f"Ready for {minutes} minutes")
+        self._touch_timer("idle")
 
     def set_custom_duration(self) -> None:
         try:
@@ -1342,6 +1630,7 @@ class TimerPage(PageBase):
                 "Personal": "Personal time is saved locally and excluded from productivity",
             }
             self.timer_status_var.set(messages[mode])
+            self._touch_timer("idle")
         else:
             self.set_duration(durations[mode])
             self.state.mode = mode
@@ -1358,10 +1647,13 @@ class TimerPage(PageBase):
                 self.task_var.set(defaults[self.state.mode])
             self.state.running = True
             self.state.paused = False
+            self.state.session_id = uuid.uuid4().hex
             self.state.started_at = datetime.now(self.app.zone)
             self.state.monotonic_anchor = time.monotonic()
             self.start_button.configure(text="Pause")
             self.timer_status_var.set(f"{self.state.mode} started")
+            self._touch_timer("running")
+            self._queue_two_way_sync()
             return
 
         if not self.state.paused:
@@ -1369,11 +1661,15 @@ class TimerPage(PageBase):
             self.state.paused = True
             self.start_button.configure(text="Resume")
             self.timer_status_var.set("Paused")
+            self._touch_timer("paused")
+            self._queue_two_way_sync()
         else:
             self.state.monotonic_anchor = time.monotonic()
             self.state.paused = False
             self.start_button.configure(text="Pause")
             self.timer_status_var.set("Resumed")
+            self._touch_timer("running")
+            self._queue_two_way_sync()
 
     def _update_clock(self) -> None:
         if self.state.monotonic_anchor is None:
@@ -1399,6 +1695,10 @@ class TimerPage(PageBase):
         )
         self.app.publish_monitor_snapshot(
             {
+                "session_id": self.state.session_id,
+                "revision": self.state.revision,
+                "sync_status": self.state.sync_status,
+                "source": "desktop",
                 "running": bool(self.state.running),
                 "paused": bool(self.state.paused),
                 "mode": self.state.mode,
@@ -1421,6 +1721,10 @@ class TimerPage(PageBase):
             if self.state.mode not in {"Flow", "Productive", "Personal"} and self.state.remaining_seconds <= 0:
                 self.finish_timer(natural=True)
         self._publish_monitor_state()
+        now_mono = time.monotonic()
+        if self.state.running and now_mono - self._last_timer_persist_at >= 5:
+            self._persist_timer_state()
+            self._last_timer_persist_at = now_mono
         self.after(200, self.tick)
 
     @staticmethod
@@ -1564,6 +1868,7 @@ class TimerPage(PageBase):
                 planned_minutes=planned_minutes,
                 minutes=actual_minutes,
                 completed=True,
+                sync_id=self.state.session_id or None,
             )
 
             if mode in {"Focus", "Flow"} and counts_toward_focus:
@@ -1582,6 +1887,12 @@ class TimerPage(PageBase):
                 self.app.local_status_var.set(
                     f"Saved {actual_minutes} personal minute(s); not sent to Pixela"
                 )
+
+        self.state.running = False
+        self.state.paused = False
+        self.state.monotonic_anchor = None
+        self._touch_timer("completed")
+        self._queue_two_way_sync()
 
         if self.app.config_data.get("sound_enabled", True):
             self.bell()
@@ -1628,6 +1939,7 @@ class TimerPage(PageBase):
         self.app.refresh_data_views()
 
     def reset_timer(self) -> None:
+        was_active = self.state.running
         self.state.running = False
         self.state.paused = False
         self.state.started_at = None
@@ -1641,6 +1953,9 @@ class TimerPage(PageBase):
         self.progress.set(0)
         self.start_button.configure(text="Start")
         self.timer_status_var.set("Reset")
+        self._touch_timer("canceled" if was_active else "idle")
+        if was_active:
+            self._queue_two_way_sync()
 
 
 class SchedulePage(PageBase):
@@ -2002,6 +2317,8 @@ class SchedulePage(PageBase):
     def _after_change(self) -> None:
         self.refresh()
         self.app.publish_cloud_snapshot_now()
+        if self.app.cloud_syncer is not None:
+            self.app.cloud_syncer.submit(self.app._cloud_sync_payload())
 
 
 class ScheduleEventDialog(ctk.CTkToplevel):
@@ -3129,9 +3446,9 @@ class SettingsPage(PageBase):
             camera,
             text=(
                 "The local camera server listens only on 127.0.0.1. You can expose "
-                "it privately with Tailscale Serve, or publish it at "
-                "camera.mojjss.ir with Cloudflare Tunnel. For the easy "
-                "Android route, turn off the Tailscale identity requirement and "
+                "it privately with Tailscale Serve, or publish it under your own "
+                "hostname with Cloudflare Tunnel. For a normal browser route, "
+                "turn off the Tailscale identity requirement and "
                 "keep the separate camera password enabled."
             ),
             wraplength=430,
@@ -3366,7 +3683,7 @@ class SettingsPage(PageBase):
                 messagebox.showerror(
                     "Invalid camera URL",
                     "Use a complete HTTPS address, for example "
-                    "https://camera.mojjss.ir or "
+                    "https://camera.example.com or "
                     "https://your-laptop.your-tailnet.ts.net",
                 )
                 return False
@@ -3378,6 +3695,7 @@ class SettingsPage(PageBase):
         self.app.config_data = new_config
         self.app.save_config_data()
         self.app._configure_cloud_publisher()
+        self.app._configure_cloud_syncer()
         self.app.camera_enabled_var.set(
             bool(new_config.get("remote_camera_enabled", False))
         )

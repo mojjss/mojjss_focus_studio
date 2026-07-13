@@ -15,6 +15,9 @@ I originally made Focus Studio for my own study and project workflow: start a ti
 - Local SQLite storage with readable CSV copies
 - Optional Pixela synchronization for focus minutes
 - Optional browser dashboard with separate owner and viewer access
+- Start, pause, resume, complete, or cancel a cloud timer from owner mode
+- Add and edit schedule events from a phone, even while the desktop is offline
+- Two-way local/cloud synchronization with offline desktop support
 - Optional private camera view through Cloudflare Tunnel
 - Configurable themes, timer lengths, categories, sounds, daily goals, and auto-start behavior
 
@@ -23,7 +26,7 @@ I originally made Focus Studio for my own study and project workflow: start a ti
 ```text
 desktop_app/
   Python desktop application, local database, timer, schedule, analytics,
-  Pixela integration, cloud sync, and optional camera server
+  Pixela integration, local-first synchronization, and optional camera server
 
 cloudflare_dashboard/
   Static browser dashboard, Cloudflare Pages Functions, and D1 schema
@@ -79,7 +82,8 @@ config.json                 App settings and integration credentials
 focus_history.db            SQLite session database
 focus_history.db-wal        SQLite working file, when present
 focus_history.db-shm        SQLite working file, when present
-schedule.csv                Personal schedule
+schedule.csv                Personal schedule and sync metadata
+timer_state.json             Restorable active timer state
 data/readable/              Human-readable CSV exports
 ```
 
@@ -107,7 +111,7 @@ Only sessions marked as productive focus time are sent to Pixela.
 
 ## Browser dashboard
 
-The browser dashboard can show the current timer, today’s progress, schedule, analytics, and recent sessions on another computer or phone.
+The browser dashboard can show the current timer, today’s progress, schedule, analytics, and recent sessions on another computer or phone. Owner mode can also create and control timers and manage schedule events.
 
 It supports three separate keys:
 
@@ -139,6 +143,32 @@ Build output directory: public
 9. Enter your deployed dashboard URL and `DESKTOP_WRITE_KEY` in the desktop app settings.
 
 A custom domain is optional. The generated `pages.dev` address also works.
+
+
+### How two-way synchronization works
+
+Focus Studio uses a local-first desktop and a cloud-first browser dashboard:
+
+```text
+Desktop app while offline
+  -> saves timers, sessions, and schedule changes locally
+  -> uploads them when the connection returns
+
+Owner dashboard while the laptop is off
+  -> stores timer and schedule changes in Cloudflare D1
+  -> the desktop imports them when it opens or reconnects
+```
+
+A timer started from the browser continues from its stored timestamps; it does not require the laptop to stay online. When the desktop app opens, the same active timer appears there. A timer started offline on the desktop continues locally and is published to the dashboard after reconnection.
+
+If two different active timers are created independently while the devices cannot communicate, neither one is silently deleted. The desktop reports a conflict and preserves the completed sessions so the user can decide which active timer to keep.
+
+The following features require the desktop computer to be online:
+
+- Camera viewing
+- Desktop sounds and notifications
+- Immediate local SQLite writes for a phone-started session
+- Pixela upload, which occurs after the desktop imports the session
 
 ## Optional remote camera
 
@@ -210,7 +240,7 @@ When Cloudflare Tunnel is used, install `cloudflared` as a Windows service so it
 
 ## Security notes
 
-- Never commit `config.json`, database files, schedules, exports, private keys, tunnel credentials, or generated secret files.
+- Never commit `config.json`, `timer_state.json`, database files, schedules, exports, private keys, tunnel credentials, or generated secret files.
 - Use different values for the viewer key, owner key, desktop write key, and camera password.
 - Rotate a credential immediately if it was ever pushed to a public Git history.
 - The hosted camera route is Internet-reachable through Cloudflare, even though the home IP and local port are not directly exposed.
@@ -237,6 +267,7 @@ focus_history.db
 focus_history.db-wal
 focus_history.db-shm
 schedule.csv
+timer_state.json
 data/
 ```
 

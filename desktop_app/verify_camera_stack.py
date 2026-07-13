@@ -8,6 +8,7 @@ import socket
 import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -19,9 +20,9 @@ from version import APP_VERSION
 APP_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = APP_DIR / "config.json"
 REPORT_PATH = APP_DIR / "CAMERA_STACK_REPORT.txt"
-TIMER_URL = "https://timer.mojjss.ir"
-CAMERA_URL = "https://camera.mojjss.ir"
-EXPECTED_ORIGIN = TIMER_URL
+TIMER_URL = ""
+CAMERA_URL = ""
+EXPECTED_ORIGIN = ""
 
 
 def redact(text: str) -> str:
@@ -156,11 +157,23 @@ def main() -> int:
     add(f"Platform: {platform.platform()}")
     add()
 
-    check("Source version", APP_VERSION == "5.4", APP_VERSION)
+    check("Source version", APP_VERSION == "5.5", APP_VERSION)
     check("Expected app.py exists", (APP_DIR / "app.py").exists(), str(APP_DIR / "app.py"))
     check("Expected camera source exists", (APP_DIR / "tailscale_camera.py").exists(), str(APP_DIR / "tailscale_camera.py"))
 
     config = load_config(CONFIG_PATH)
+    global TIMER_URL, CAMERA_URL, EXPECTED_ORIGIN
+    TIMER_URL = str(config.get("cloud_dashboard_url", "")).strip().rstrip("/")
+    CAMERA_URL = str(config.get("tailscale_camera_url", "")).strip().rstrip("/")
+    allowed_origins = [
+        value.strip().rstrip("/")
+        for value in str(config.get("tailscale_camera_allowed_origin", "")).split(",")
+        if value.strip()
+    ]
+    EXPECTED_ORIGIN = allowed_origins[0] if allowed_origins else TIMER_URL
+    if not TIMER_URL or not CAMERA_URL:
+        print("Configure both the cloud dashboard URL and camera public URL before running this diagnostic.")
+        return 2
     port = int(config.get("tailscale_camera_port", 8788))
     configured_url = str(config.get("tailscale_camera_url", "")).strip().rstrip("/")
     origins = str(config.get("tailscale_camera_allowed_origin", "")).strip()
@@ -232,7 +245,7 @@ def main() -> int:
         add(f"Access-Control-Allow-Origin: {headers.get('Access-Control-Allow-Origin', '')}")
         check("CORS preflight accepted", status in {200, 204})
         check(
-            "CORS allows timer.mojjss.ir",
+            "CORS allows configured dashboard origin",
             headers.get("Access-Control-Allow-Origin", "").rstrip("/").lower()
             == EXPECTED_ORIGIN.lower(),
             headers.get("Access-Control-Allow-Origin", "missing"),
@@ -253,7 +266,7 @@ def main() -> int:
     try:
         status, _, body = request(TIMER_URL + "/")
         check("Timer website HTTP 200", status == 200)
-        check("Timer website is v5.4", "v5.4" in body, "v5.4 marker present" if "v5.4" in body else "marker missing")
+        check(f"Timer website is v{APP_VERSION}", f"v{APP_VERSION}" in body, f"v{APP_VERSION} marker present" if f"v{APP_VERSION}" in body else "marker missing")
     except Exception as exc:
         add(f"Timer page exception: {type(exc).__name__}: {exc}")
         check("Timer page reachable", False)
@@ -261,7 +274,13 @@ def main() -> int:
     add()
     add("DNS and Cloudflare connector tests")
     add("-" * 72)
-    for host in ["camera.mojjss.ir", "timer.mojjss.ir", "region1.v2.argotunnel.com"]:
+    for host in [
+        value for value in [
+            urllib.parse.urlparse(CAMERA_URL).hostname if CAMERA_URL else None,
+            urllib.parse.urlparse(TIMER_URL).hostname if TIMER_URL else None,
+            "region1.v2.argotunnel.com",
+        ] if value
+    ]:
         try:
             addresses = resolve(host)
             add(f"{host}: {', '.join(addresses)}")
@@ -334,7 +353,8 @@ def main() -> int:
         add("At least one check failed. Read the first failed section above; later failures may be consequences of it.")
     add()
     add("Cloudflare route must be exactly:")
-    add("  camera.mojjss.ir  ->  http://127.0.0.1:8788")
+    camera_host = urllib.parse.urlparse(CAMERA_URL).hostname if CAMERA_URL else "<your-camera-hostname>"
+    add(f"  {camera_host}  ->  http://127.0.0.1:8788")
     add("Cloudflare documents published applications as public-hostname-to-local-service mappings.")
 
     REPORT_PATH.write_text("\n".join(lines), encoding="utf-8")

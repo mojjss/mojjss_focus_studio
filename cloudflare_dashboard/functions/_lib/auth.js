@@ -39,6 +39,10 @@ export function hasReadAccess(request, env) {
   return Boolean(getAccessRole(request, env));
 }
 
+export function hasOwnerAccess(request, env) {
+  return getAccessRole(request, env) === "owner";
+}
+
 export function hasWriteAccess(request, env) {
   const supplied =
     request.headers.get("X-Write-Key") ||

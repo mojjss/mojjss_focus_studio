@@ -351,7 +351,7 @@ header{display:flex;gap:16px;align-items:center;justify-content:space-between;ma
 }
 
 
-/* Secure camera route — v5.4 */
+/* Secure camera route — v5.5 */
 .camera-route-notice{
   display:flex;
   align-items:center;
@@ -472,10 +472,32 @@ header{display:flex;gap:16px;align-items:center;justify-content:space-between;ma
   .private-camera-viewport img{min-height:235px}
 }
 
-/* v5.4 role and pagination controls */
+/* v5.5 role and pagination controls */
 .role-badge{background:rgba(76,194,255,.12);color:var(--blue);border-color:rgba(76,194,255,.22)}
 .role-badge.owner{background:rgba(255,200,87,.14);color:var(--amber);border-color:rgba(255,200,87,.24)}
 .recent-controls{display:flex;gap:8px;justify-content:center;margin-top:14px;flex-wrap:wrap}
 .recent-controls button{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:11px;padding:8px 14px;cursor:pointer;font-weight:750}
 .recent-controls button:hover{filter:brightness(1.08)}
 .session-notes{margin-top:7px;padding:7px 9px;border-left:3px solid var(--line);background:var(--panel2);border-radius:6px;white-space:pre-wrap}
+
+/* Owner controls — v5.5 */
+.hidden{display:none!important}
+.owner-only{border-color:rgba(76,194,255,.28)}
+.owner-form{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr));gap:10px;align-items:end}
+.owner-form label{display:flex;flex-direction:column;gap:5px;color:var(--muted);font-size:11px;font-weight:800}
+.owner-form input,.owner-form select,.owner-form textarea{width:100%;box-sizing:border-box;border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:10px;padding:10px 11px;font:inherit}
+.owner-form button,.owner-actions button,#ownerScheduleNew{border:0;border-radius:10px;padding:10px 14px;background:var(--blue);color:#06111d;font-weight:850;cursor:pointer}
+.owner-check{flex-direction:row!important;align-items:center;padding-bottom:10px}
+.owner-check input{width:auto}
+.owner-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.owner-actions button{background:var(--panel2);color:var(--text);border:1px solid var(--line)}
+.owner-actions button.danger,.owner-schedule-list button.danger{color:var(--red);border-color:rgba(255,122,138,.35)}
+.owner-actions button:disabled,.owner-form button:disabled{opacity:.45;cursor:not-allowed}
+.owner-message{margin-top:10px;min-height:18px}
+.schedule-owner-form{grid-template-columns:repeat(5,minmax(120px,1fr))}
+.schedule-owner-form .wide{grid-column:1/-1}
+.owner-schedule-list{display:grid;gap:8px;margin-top:14px}
+.owner-schedule-row{display:grid;grid-template-columns:110px 110px minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:11px;background:var(--panel2)}
+.owner-schedule-row button{border:1px solid var(--line);background:var(--panel);color:var(--blue);border-radius:8px;padding:7px 9px;cursor:pointer}
+@media(max-width:900px){.owner-form,.schedule-owner-form{grid-template-columns:1fr 1fr}.owner-schedule-row{grid-template-columns:90px minmax(0,1fr);}.owner-schedule-row .schedule-actions{grid-column:2}}
+@media(max-width:560px){.owner-form,.schedule-owner-form{grid-template-columns:1fr}.owner-schedule-row{grid-template-columns:1fr}.owner-schedule-row .schedule-actions{grid-column:1}}

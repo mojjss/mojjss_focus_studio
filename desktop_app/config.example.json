@@ -31,7 +31,7 @@
   "monitor_port": 8765,
   "web_dashboard_auto_open": true,
   "cloud_dashboard_enabled": false,
-  "cloud_dashboard_url": "https://timer.mojjss.ir",
+  "cloud_dashboard_url": "",
   "cloud_desktop_write_key": "",
   "cloud_running_update_seconds": 4,
   "cloud_idle_update_seconds": 30,
@@ -47,8 +47,12 @@
   "remote_camera_jpeg_quality": 72,
   "remote_camera_idle_seconds": 15,
   "tailscale_camera_port": 8788,
-  "tailscale_camera_url": "https://camera.mojjss.ir",
-  "tailscale_camera_allowed_origin": "https://timer.mojjss.ir, https://camera.mojjss.ir",
+  "tailscale_camera_url": "",
+  "tailscale_camera_allowed_origin": "",
   "tailscale_camera_require_identity": false,
-  "tailscale_camera_allowed_users": ""
+  "tailscale_camera_allowed_users": "",
+  "cloud_two_way_sync_enabled": true,
+  "cloud_sync_running_seconds": 5,
+  "cloud_sync_idle_seconds": 30,
+  "cloud_device_id": ""
 }

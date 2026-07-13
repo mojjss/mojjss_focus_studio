@@ -1,14 +1,9 @@
-# Mojjss Focus Studio — secure repository exclusions
-# Put this file at the repository root and rename it to: .gitignore
+# Mojjss Focus Studio — local/private files
 
-# -----------------------------------------------------------------------------
-# Local secrets and machine-specific configuration
-# -----------------------------------------------------------------------------
+# Machine-specific configuration and secrets
 /desktop_app/config.json
 /desktop_app/config.local.json
 /desktop_app/config.*.local.json
-
-# Environment and local-development secret files
 **/.env
 **/.env.*
 !**/.env.example
@@ -22,9 +17,8 @@
 **/*.secrets
 **/secrets.json
 
-# -----------------------------------------------------------------------------
-# Private application data
-# -----------------------------------------------------------------------------
+# Local timer, sessions, schedules, reports, and exports
+/desktop_app/timer_state.json
 /desktop_app/focus_history.db*
 /desktop_app/schedule.csv
 /desktop_app/data/
@@ -36,9 +30,7 @@
 /desktop_app/*.sqlite
 /desktop_app/*.sqlite3
 
-# -----------------------------------------------------------------------------
-# Cloudflare Pages / Workers local files and generated keys
-# -----------------------------------------------------------------------------
+# Cloudflare local state and generated keys
 /cloudflare_dashboard/PRIVATE-CLOUDFLARE-KEYS.txt
 /cloudflare_dashboard/*PRIVATE*.txt
 /cloudflare_dashboard/.secrets*.json
@@ -48,7 +40,7 @@
 /cloudflare_dashboard/wrangler.jsonc
 /cloudflare_dashboard/node_modules/
 
-# Cloudflare Tunnel credentials and local connector material
+# Cloudflare Tunnel credentials
 **/.cloudflared/
 **/cert.pem
 **/*.json.credentials
@@ -59,20 +51,16 @@
 **/*.p12
 **/*.pfx
 
-# -----------------------------------------------------------------------------
-# Installer backups, temporary verification repositories, and generated reports
-# -----------------------------------------------------------------------------
+# Installer backups and temporary files
 **/_backup_before_v54_*/
-/.git-test-repo/
+**/_backup_before_v55_*/
 *.bak
 *.backup
 *.old
 *.tmp
 *.temp
 
-# -----------------------------------------------------------------------------
-# Python caches, environments, tests, and build output
-# -----------------------------------------------------------------------------
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -90,9 +78,7 @@ build/
 dist/
 *.egg-info/
 
-# -----------------------------------------------------------------------------
-# JavaScript package-manager artifacts
-# -----------------------------------------------------------------------------
+# JavaScript tooling
 node_modules/
 .npm/
 .pnpm-store/
@@ -101,9 +87,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# -----------------------------------------------------------------------------
-# Editors and operating-system files
-# -----------------------------------------------------------------------------
+# Editors and OS
 .vscode/
 .idea/
 *.code-workspace
