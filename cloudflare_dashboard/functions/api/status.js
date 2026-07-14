@@ -85,6 +85,11 @@ function summaryForRange(items, start, end) {
 }
 
 export async function onRequestGet(context) {
+  console.log(
+  await context.env.DB
+    .prepare("SELECT name FROM sqlite_master WHERE type='table'")
+    .all()
+);
   const { request, env } = context;
   const role = getAccessRole(request, env);
   if (!role) {
