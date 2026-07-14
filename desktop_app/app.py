@@ -2860,7 +2860,7 @@ class AnalyticsPage(PageBase):
 
         period = ctk.CTkSegmentedButton(
             body,
-            values=["7 days", "30 days", "90 days", "All"],
+            values=["1 day", "3 days", "7 days", "30 days", "90 days", "All"],
             variable=self.period_var,
             command=lambda _value: self.refresh(),
         )
@@ -2887,7 +2887,7 @@ class AnalyticsPage(PageBase):
         self.chart.grid(row=2, column=0, sticky="nsew")
 
     def _days(self) -> int | None:
-        return {"7 days": 7, "30 days": 30, "90 days": 90, "All": None}[self.period_var.get()]
+        return {"1 day": 1, "3 days": 3, "7 days": 7, "30 days": 30, "90 days": 90, "All": None}[self.period_var.get()]
 
     def refresh(self) -> None:
         days = self._days()

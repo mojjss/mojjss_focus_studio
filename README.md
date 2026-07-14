@@ -11,7 +11,7 @@ I originally made Focus Studio for my own study and project workflow: start a ti
 - One-click copy button for the current activity summary
 - Date-based schedule with add, edit, duplicate, and delete controls
 - Searchable and editable session history with pagination
-- Daily, weekly, category, and activity analytics
+- Daily, weekday, category, and activity analytics with 1-day, 3-day, 7-day, 30-day, 90-day, and all-time ranges
 - Local SQLite storage with readable CSV copies
 - Optional Pixela synchronization for focus minutes
 - Optional browser dashboard with separate owner and viewer access
@@ -111,7 +111,7 @@ Only sessions marked as productive focus time are sent to Pixela.
 
 ## Browser dashboard
 
-The browser dashboard can show the current timer, today’s progress, schedule, analytics, and recent sessions on another computer or phone. Owner mode can also create and control timers and manage schedule events.
+The browser dashboard can show the current timer, today’s progress, schedule, analytics, and recent sessions on another computer or phone. Owner mode can also create and control timers and manage schedule events. Recent sessions are shown 10 per page; viewer access can see up to 30 sessions, while owner access can see up to 250.
 
 It supports three separate keys:
 
