@@ -41,7 +41,8 @@ let fetchedAt = performance.now();
 let graphKey = "";
 let summaryPeriod = "today";
 let scheduleView = "day";
-let recentVisible = 10;
+const RECENT_PAGE_SIZE = 10;
+let recentPage = 1;
 let privateCameraViewing = false;
 let privateCameraBusy = false;
 let privateCameraToken = "";
@@ -63,6 +64,7 @@ $("logoutButton").onclick = () => {
   localStorage.removeItem("focusDashboardReadKey");
   readKey = "";
   latest = null;
+  recentPage = 1;
   stopPrivateCamera(false);
   $("login").classList.remove("hidden");
   $("connection").textContent = "Locked";
@@ -75,6 +77,7 @@ $("loginForm").addEventListener("submit", async (event) => {
   $("loginError").textContent = "Checking…";
   const success = await refresh(true);
   if (success) {
+    recentPage = 1;
     localStorage.setItem("focusDashboardReadKey", readKey);
     $("login").classList.add("hidden");
     $("loginError").textContent = "";
@@ -260,17 +263,74 @@ function formatRecentDate(item) {
   };
 }
 
+function paginationTokens(currentPage, totalPages) {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1);
+  }
+
+  const pages = new Set([1, totalPages]);
+  for (let page = currentPage - 2; page <= currentPage + 2; page += 1) {
+    if (page > 1 && page < totalPages) pages.add(page);
+  }
+
+  const ordered = [...pages].sort((left, right) => left - right);
+  const tokens = [];
+  ordered.forEach((page, index) => {
+    if (index && page - ordered[index - 1] > 1) tokens.push("ellipsis");
+    tokens.push(page);
+  });
+  return tokens;
+}
+
+function renderRecentPagination(totalPages) {
+  const container = $("recentPagination");
+  if (!container) return;
+
+  if (totalPages <= 1) {
+    container.innerHTML = "";
+    container.hidden = true;
+    return;
+  }
+
+  container.hidden = false;
+  const pageButtons = paginationTokens(recentPage, totalPages).map((token) => {
+    if (token === "ellipsis") {
+      return '<span class="page-ellipsis" aria-hidden="true">…</span>';
+    }
+    const current = token === recentPage;
+    return `<button type="button" class="page-button${current ? " active" : ""}"
+      data-page="${token}" aria-label="Go to sessions page ${token}"
+      ${current ? 'aria-current="page"' : ""}>${token}</button>`;
+  }).join("");
+
+  container.innerHTML = `
+    <button type="button" class="page-button page-direction" data-page="${recentPage - 1}"
+      aria-label="Previous sessions page" ${recentPage === 1 ? "disabled" : ""}>‹</button>
+    ${pageButtons}
+    <button type="button" class="page-button page-direction" data-page="${recentPage + 1}"
+      aria-label="Next sessions page" ${recentPage === totalPages ? "disabled" : ""}>›</button>`;
+}
+
 function renderRecent(items) {
   const ordered = Array.isArray(items) ? items.slice().reverse() : [];
-  const visible = ordered.slice(0, recentVisible);
-  $("recentCount").textContent = `${Math.min(recentVisible, ordered.length)} of ${ordered.length} sessions`;
-  $("showMoreSessions").style.display = recentVisible < ordered.length ? "inline-flex" : "none";
-  $("showFewerSessions").style.display = recentVisible > 10 ? "inline-flex" : "none";
+  const totalPages = Math.max(1, Math.ceil(ordered.length / RECENT_PAGE_SIZE));
+  recentPage = Math.min(Math.max(1, recentPage), totalPages);
+
+  const startIndex = (recentPage - 1) * RECENT_PAGE_SIZE;
+  const visible = ordered.slice(startIndex, startIndex + RECENT_PAGE_SIZE);
+  const firstShown = ordered.length ? startIndex + 1 : 0;
+  const lastShown = Math.min(startIndex + RECENT_PAGE_SIZE, ordered.length);
+
+  $("recentCount").textContent = ordered.length
+    ? `${firstShown}–${lastShown} of ${ordered.length} sessions`
+    : "0 sessions";
 
   if (!ordered.length) {
     $("recent").innerHTML = '<div class="empty">No completed sessions yet.</div>';
+    renderRecentPagination(0);
     return;
   }
+
   $("recent").innerHTML = visible.map((item) => {
     const when = formatRecentDate(item);
     const ownerDetails = latest?.access?.role === "owner" && item.notes
@@ -290,15 +350,18 @@ function renderRecent(items) {
       <div class="right">${esc(item.minutes || 0)}m</div>
     </div>`;
   }).join("");
+
+  renderRecentPagination(totalPages);
 }
 
-$("showMoreSessions").addEventListener("click", () => {
-  recentVisible += 10;
-  renderRecent(latest?.recent || []);
-});
+$("recentPagination").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-page]");
+  if (!button || button.disabled) return;
 
-$("showFewerSessions").addEventListener("click", () => {
-  recentVisible = 10;
+  const nextPage = Number(button.dataset.page);
+  if (!Number.isInteger(nextPage) || nextPage < 1) return;
+
+  recentPage = nextPage;
   renderRecent(latest?.recent || []);
   $("recent").scrollIntoView({ behavior: "smooth", block: "start" });
 });
