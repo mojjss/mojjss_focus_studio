@@ -53,7 +53,7 @@ DEFAULT_CONFIG = {
     "remote_camera_password_iterations": 100000,
     "tunnel_monitor_enabled": True,
     "tunnel_check_seconds": 30,
-    "tunnel_notifications_enabled": True,
+    "tunnel_notifications_enabled": False,
     "categories": [
         "Research",
         "Coursework",

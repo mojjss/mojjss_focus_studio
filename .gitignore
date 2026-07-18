@@ -30,6 +30,9 @@
 /desktop_app/*.sqlite
 /desktop_app/*.sqlite3
 
+# Local troubleshooting files
+/STRUGGLE TO FIX THE CAM/
+
 # Cloudflare local state and generated keys
 /cloudflare_dashboard/PRIVATE-CLOUDFLARE-KEYS.txt
 /cloudflare_dashboard/*PRIVATE*.txt

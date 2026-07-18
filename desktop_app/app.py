@@ -911,37 +911,8 @@ class FocusApp(ctk.CTk):
                 )
 
     def _show_tunnel_toast(self, title: str, message: str) -> None:
-        try:
-            self.bell()
-            popup = ctk.CTkToplevel(self)
-            popup.title(title)
-            popup.geometry("430x170")
-            popup.resizable(False, False)
-            popup.attributes("-topmost", True)
-            popup.transient(self)
-            ctk.CTkLabel(
-                popup,
-                text=title,
-                font=ctk.CTkFont(size=17, weight="bold"),
-            ).pack(anchor="w", padx=18, pady=(16, 6))
-            ctk.CTkLabel(
-                popup,
-                text=message,
-                justify="left",
-                wraplength=390,
-            ).pack(anchor="w", padx=18, pady=(0, 10))
-            ctk.CTkButton(
-                popup,
-                text="Open diagnostics",
-                width=150,
-                command=lambda: (
-                    popup.destroy(),
-                    self.show_page("Diagnostics"),
-                ),
-            ).pack(anchor="e", padx=18, pady=(0, 14))
-            popup.after(9000, lambda: popup.winfo_exists() and popup.destroy())
-        except Exception:
-            pass
+        # Monitoring stays active, but it no longer interrupts the user.
+        return
 
     def refresh_tunnel_health(self) -> None:
         self.tunnel_status_var.set("Tunnel: checking…")
@@ -986,10 +957,17 @@ class FocusApp(ctk.CTk):
         )
 
     def _build_sidebar(self) -> None:
-        sidebar = ctk.CTkFrame(self, width=312, corner_radius=0)
+        self.sidebar = ctk.CTkScrollableFrame(
+            self,
+            width=286,
+            corner_radius=0,
+            fg_color=("#e8edf3", "#111827"),
+            scrollbar_button_color=("#cbd5e1", "#334155"),
+            scrollbar_button_hover_color=("#94a3b8", "#475569"),
+        )
+        sidebar = self.sidebar
         sidebar.grid(row=0, column=0, sticky="nsew")
-        sidebar.grid_rowconfigure(10, weight=1)
-        sidebar.grid_propagate(False)
+        sidebar.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
             sidebar,
@@ -1029,6 +1007,7 @@ class FocusApp(ctk.CTk):
 
         page_names = [
             "Timer",
+            "Focus",
             "Schedule",
             "Sessions",
             "Analytics",
@@ -1139,8 +1118,10 @@ class FocusApp(ctk.CTk):
         host.grid_columnconfigure(0, weight=1)
         host.grid_rowconfigure(0, weight=1)
 
+        timer_page = TimerPage(host, self)
         self.pages = {
-            "Timer": TimerPage(host, self),
+            "Timer": timer_page,
+            "Focus": FocusModePage(host, self, timer_page),
             "Schedule": SchedulePage(host, self),
             "Sessions": SessionsPage(host, self),
             "Analytics": AnalyticsPage(host, self),
@@ -1153,6 +1134,12 @@ class FocusApp(ctk.CTk):
 
     def show_page(self, name: str) -> None:
         self.active_page = name
+
+        if name == "Focus":
+            self.sidebar.grid_remove()
+        else:
+            self.sidebar.grid()
+
         self.pages[name].tkraise()
         for page_name, button in self.nav_buttons.items():
             if page_name == name:
@@ -1170,7 +1157,7 @@ class FocusApp(ctk.CTk):
             refresh()
 
     def refresh_data_views(self) -> None:
-        for name in ("Timer", "Schedule", "Sessions", "Analytics", "Pixela"):
+        for name in ("Timer", "Focus", "Schedule", "Sessions", "Analytics", "Pixela"):
             refresh = getattr(self.pages.get(name), "refresh", None)
             if callable(refresh):
                 refresh()
@@ -1335,7 +1322,13 @@ class TimerPage(PageBase):
         self.after(200, self.tick)
 
     def _build(self) -> None:
-        body = ctk.CTkFrame(self, fg_color="transparent")
+        body = ctk.CTkScrollableFrame(
+            self,
+            fg_color="transparent",
+            corner_radius=0,
+            scrollbar_button_color=("#cbd5e1", "#334155"),
+            scrollbar_button_hover_color=("#94a3b8", "#475569"),
+        )
         body.grid(row=1, column=0, padx=26, pady=(0, 24), sticky="nsew")
         body.grid_columnconfigure(0, weight=5)
         body.grid_columnconfigure(1, weight=3)
@@ -1420,43 +1413,74 @@ class TimerPage(PageBase):
         ctk.CTkButton(custom, text="Set custom", width=92, command=self.set_custom_duration).pack(side="left")
 
         controls = ctk.CTkFrame(timer_card, fg_color="transparent")
-        controls.grid(row=6, column=0, pady=(10, 12))
+        controls.grid(
+            row=6,
+            column=0,
+            padx=24,
+            pady=(10, 12),
+            sticky="ew",
+        )
+        controls.grid_columnconfigure((0, 1), weight=1)
+
         self.start_button = ctk.CTkButton(
             controls,
             text="Start",
-            width=150,
             height=46,
             font=ctk.CTkFont(size=16, weight="bold"),
             command=self.start_pause,
         )
-        self.start_button.pack(side="left", padx=5)
+        self.start_button.grid(
+            row=0,
+            column=0,
+            padx=(0, 5),
+            pady=(0, 5),
+            sticky="ew",
+        )
+
         ctk.CTkButton(
             controls,
             text="Complete now",
-            width=120,
             height=46,
             fg_color=("#0f766e", "#0f766e"),
             hover_color=("#115e59", "#115e59"),
             command=self.complete_early,
-        ).pack(side="left", padx=5)
+        ).grid(
+            row=0,
+            column=1,
+            padx=(5, 0),
+            pady=(0, 5),
+            sticky="ew",
+        )
+
         ctk.CTkButton(
             controls,
             text="Reset",
-            width=90,
-            height=46,
+            height=42,
             fg_color=("#64748b", "#475569"),
             hover_color=("#475569", "#334155"),
             command=self.reset_timer,
-        ).pack(side="left", padx=5)
+        ).grid(
+            row=1,
+            column=0,
+            padx=(0, 5),
+            pady=(5, 0),
+            sticky="ew",
+        )
+
         ctk.CTkButton(
             controls,
             text="Copy activity summary",
-            width=170,
-            height=46,
+            height=42,
             fg_color=("#1d4ed8", "#2563eb"),
             hover_color=("#1e40af", "#1d4ed8"),
             command=self.copy_activity_summary,
-        ).pack(side="left", padx=5)
+        ).grid(
+            row=1,
+            column=1,
+            padx=(5, 0),
+            pady=(5, 0),
+            sticky="ew",
+        )
 
         ctk.CTkLabel(
             timer_card,
@@ -2120,6 +2144,170 @@ class TimerPage(PageBase):
         self._touch_timer("canceled" if was_active else "idle")
         if was_active:
             self._queue_two_way_sync()
+
+
+
+# FOCUS_STUDIO_INTERFACE_FIX_V1
+class FocusModePage(ctk.CTkFrame):
+    # A distraction-free view backed by the exact same TimerPage state.
+
+    def __init__(
+        self,
+        master,
+        app: FocusApp,
+        timer_page: TimerPage,
+    ):
+        super().__init__(master, fg_color="transparent")
+        self.app = app
+        self.timer_page = timer_page
+
+        self.task_display_var = ctk.StringVar(value="No task selected")
+        self.mode_display_var = ctk.StringVar(value="Focus")
+        self.start_text_var = ctk.StringVar(value="Start")
+
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure((0, 2), weight=1)
+
+        card = ctk.CTkFrame(self, corner_radius=22)
+        card.grid(
+            row=1,
+            column=0,
+            padx=36,
+            pady=36,
+            sticky="ew",
+        )
+        card.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            card,
+            text="FOCUS MODE",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=("#64748b", "#94a3b8"),
+        ).grid(row=0, column=0, padx=28, pady=(26, 4))
+
+        ctk.CTkLabel(
+            card,
+            textvariable=self.task_display_var,
+            font=ctk.CTkFont(size=24, weight="bold"),
+            wraplength=720,
+            justify="center",
+        ).grid(row=1, column=0, padx=28, pady=(4, 2))
+
+        ctk.CTkLabel(
+            card,
+            textvariable=self.mode_display_var,
+            font=ctk.CTkFont(size=13),
+            text_color=("#64748b", "#94a3b8"),
+        ).grid(row=2, column=0, padx=28, pady=(0, 14))
+
+        ctk.CTkLabel(
+            card,
+            textvariable=self.timer_page.time_var,
+            font=ctk.CTkFont(size=92, weight="bold"),
+        ).grid(row=3, column=0, padx=28, pady=(4, 10))
+
+        self.progress = ctk.CTkProgressBar(card, height=12)
+        self.progress.grid(
+            row=4,
+            column=0,
+            padx=54,
+            pady=(0, 18),
+            sticky="ew",
+        )
+        self.progress.set(0)
+
+        ctk.CTkLabel(
+            card,
+            textvariable=self.timer_page.timer_status_var,
+            font=ctk.CTkFont(size=13),
+            text_color=("#64748b", "#94a3b8"),
+        ).grid(row=5, column=0, padx=28, pady=(0, 16))
+
+        controls = ctk.CTkFrame(card, fg_color="transparent")
+        controls.grid(row=6, column=0, padx=28, pady=(0, 10), sticky="ew")
+        controls.grid_columnconfigure((0, 1), weight=1)
+
+        self.start_button = ctk.CTkButton(
+            controls,
+            textvariable=self.start_text_var,
+            height=52,
+            font=ctk.CTkFont(size=17, weight="bold"),
+            command=self.timer_page.start_pause,
+        )
+        self.start_button.grid(
+            row=0,
+            column=0,
+            padx=(0, 6),
+            sticky="ew",
+        )
+
+        self.complete_button = ctk.CTkButton(
+            controls,
+            text="Complete",
+            height=52,
+            font=ctk.CTkFont(size=15, weight="bold"),
+            fg_color=("#0f766e", "#0f766e"),
+            hover_color=("#115e59", "#115e59"),
+            command=self.timer_page.complete_early,
+        )
+        self.complete_button.grid(
+            row=0,
+            column=1,
+            padx=(6, 0),
+            sticky="ew",
+        )
+
+        ctk.CTkButton(
+            card,
+            text="Back to timer setup",
+            height=34,
+            fg_color="transparent",
+            text_color=("#64748b", "#94a3b8"),
+            hover_color=("#e2e8f0", "#28313d"),
+            command=lambda: self.app.show_page("Timer"),
+        ).grid(row=7, column=0, padx=28, pady=(0, 24))
+
+        self.after(100, self._sync_from_timer)
+
+    def _sync_from_timer(self) -> None:
+        try:
+            state = self.timer_page.state
+            task = self.timer_page.task_var.get().strip()
+            self.task_display_var.set(task or "No task selected")
+            self.mode_display_var.set(
+                self.timer_page.mode_var.get().strip() or state.mode
+            )
+
+            if state.running and state.paused:
+                self.start_text_var.set("Resume")
+            elif state.running:
+                self.start_text_var.set("Pause")
+            else:
+                self.start_text_var.set("Start")
+
+            self.complete_button.configure(
+                state="normal" if state.running else "disabled"
+            )
+
+            duration = max(1, int(state.duration_seconds))
+            if state.mode == "Flow":
+                progress = min(1.0, max(0.0, state.elapsed_seconds / duration))
+            else:
+                progress = 1.0 - (state.remaining_seconds / duration)
+                progress = min(1.0, max(0.0, progress))
+            self.progress.set(progress)
+        except Exception:
+            pass
+
+        try:
+            if self.winfo_exists():
+                self.after(200, self._sync_from_timer)
+        except Exception:
+            pass
+
+    def refresh(self) -> None:
+        # The recurring 200 ms update is already active.
+        return
 
 
 class SchedulePage(PageBase):
@@ -3890,12 +4078,16 @@ class SettingsPage(PageBase):
             "tunnel_check_seconds",
             1,
         )
-        self._switch(
+        ctk.CTkLabel(
             stability,
-            "Notify when the tunnel disconnects or recovers",
-            "tunnel_notifications_enabled",
-            2,
-        )
+            text=(
+                "Tunnel changes are shown silently in the sidebar and "
+                "Diagnostics page."
+            ),
+            wraplength=430,
+            justify="left",
+            text_color=("#64748b", "#94a3b8"),
+        ).grid(row=5, column=0, padx=14, pady=10, sticky="w")
         ctk.CTkButton(
             stability,
             text="Open Diagnostics page",
