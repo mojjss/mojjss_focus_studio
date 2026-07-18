@@ -28,7 +28,7 @@ class CloudStateSynchronizer:
         self.status_callback = status_callback
         self.result_callback = result_callback
         self.http = ReliableHttpClient(
-            user_agent="Mojjss-Focus-Studio-Cloud-Sync/5.5",
+            user_agent="Mojjss-Focus-Studio-Cloud-Sync/5.6",
             retries=2,
             connect_timeout=10,
             read_timeout=30,

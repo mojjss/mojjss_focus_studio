@@ -1,0 +1,13 @@
+Mojjss Focus Studio v5.5.2 maintenance release
+
+Changes:
+- Fixed local monitor client-disconnect handling for Windows errors 10053/10054.
+- Prevents a second HTTP 500 write to a connection that the browser already closed.
+- Removed temporary D1 table-list console logging from /api/status.
+- Kept 1-day and 3-day analytics options and added the same ranges to the session log filter.
+- Added a dedicated Cloudflare Tunnel repair tool.
+- Added a broad, redacted Focus Studio diagnosis tool.
+- Added safe install/update and normal/debug launch BAT files.
+- Updated APP_VERSION to 5.5.2.
+
+Private data is not included in this package.

@@ -157,7 +157,7 @@ def main() -> int:
     add(f"Platform: {platform.platform()}")
     add()
 
-    check("Source version", APP_VERSION == "5.5", APP_VERSION)
+    check("Source version", APP_VERSION == "5.6", APP_VERSION)
     check("Expected app.py exists", (APP_DIR / "app.py").exists(), str(APP_DIR / "app.py"))
     check("Expected camera source exists", (APP_DIR / "tailscale_camera.py").exists(), str(APP_DIR / "tailscale_camera.py"))
 

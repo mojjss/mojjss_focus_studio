@@ -42,6 +42,7 @@ from database import SessionStore
 from pixela_client import PixelaClient, PixelaError
 from schedule_store import ScheduleStore, ScheduleValidationError
 from monitor_server import MonitorServer
+from tunnel_monitor import TunnelHealth, TunnelHealthMonitor
 
 try:
     import resvg_py
@@ -50,6 +51,7 @@ except ImportError:  # Optional only for the in-app official SVG preview.
 
 
 APP_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = APP_DIR.parent
 CONFIG_PATH = APP_DIR / "config.json"
 DB_PATH = APP_DIR / "focus_history.db"
 READABLE_DIR = APP_DIR / "data" / "readable"
@@ -100,6 +102,12 @@ class FocusApp(ctk.CTk):
         self._cloud_client_since: str | None = None
         self._cloud_server_since: str | None = None
         self.camera_server: TailscaleCameraServer | None = None
+        self.tunnel_monitor = TunnelHealthMonitor(
+            config_provider=lambda: self.config_data,
+            callback=self._set_tunnel_health_threadsafe,
+        )
+        self._last_tunnel_health: TunnelHealth | None = None
+        self._last_tunnel_overall = ""
 
         self.title(f"mojjss Focus Studio v{APP_VERSION}")
         self.geometry("1420x840")
@@ -118,12 +126,14 @@ class FocusApp(ctk.CTk):
         self.local_status_var = ctk.StringVar(value="Local database ready")
         self.cloud_status_var = ctk.StringVar(value="Cloud dashboard: disabled")
         self.camera_status_var = ctk.StringVar(value="Private camera: disabled")
+        self.tunnel_status_var = ctk.StringVar(value="Tunnel: checking…")
         self.camera_enabled_var = ctk.BooleanVar(
             value=bool(config.get("remote_camera_enabled", False))
         )
         self.pixela_status_detail = "Pixela has not been checked yet."
         self.cloud_status_detail = "Cloud dashboard is disabled."
         self.camera_status_detail = "Private camera is disabled."
+        self.tunnel_status_detail = "Tunnel health has not been checked yet."
 
         self._build_sidebar()
         self._build_content()
@@ -132,6 +142,7 @@ class FocusApp(ctk.CTk):
         self._configure_cloud_publisher()
         self._configure_cloud_syncer()
         self._configure_remote_camera()
+        self.tunnel_monitor.start()
         self.after(1200, self._cloud_dashboard_tick)
         self.after(1800, self._cloud_sync_tick)
         self.after(700, self.background_connection_check)
@@ -824,12 +835,148 @@ class FocusApp(ctk.CTk):
         details = (
             f"PIXELA\n{self.pixela_status_detail}\n\n"
             f"CLOUD DASHBOARD\n{self.cloud_status_detail}\n\n"
-            f"PRIVATE TAILSCALE CAMERA\n{self.camera_status_detail}\n\n"
+            f"PRIVATE CAMERA\n{self.camera_status_detail}\n\n"
+            f"CLOUDFLARE TUNNEL\n{self.tunnel_status_detail}\n\n"
             f"LOCAL DASHBOARD\n{self.local_status_var.get()}\n"
         )
         text.insert("1.0", details)
         text.configure(state="disabled")
         ctk.CTkButton(window, text="Close", command=window.destroy).pack(anchor="e", padx=20, pady=(0, 18))
+
+    def _set_tunnel_health_threadsafe(self, health: TunnelHealth) -> None:
+        try:
+            self.after(0, lambda: self._apply_tunnel_health(health))
+        except Exception:
+            pass
+
+    def _apply_tunnel_health(self, health: TunnelHealth) -> None:
+        previous = self._last_tunnel_overall
+        self._last_tunnel_health = health
+        self._last_tunnel_overall = health.overall
+
+        if health.overall in {"healthy", "public_healthy_origin_uncertain"}:
+            label = "Tunnel: online"
+        elif health.overall == "access_protected":
+            label = "Tunnel: reachable · Access protected"
+        elif health.overall == "not_configured":
+            label = "Tunnel: not configured"
+        elif health.overall == "not_enabled":
+            label = "Tunnel: camera monitoring disabled"
+        elif health.overall == "route_reachable":
+            label = "Tunnel: connected · health path missing"
+        elif health.overall == "service_down":
+            label = "Tunnel: Cloudflared service stopped"
+        elif health.overall == "service_missing":
+            label = "Tunnel: Cloudflared service missing"
+        elif health.overall == "tunnel_down":
+            label = "Tunnel: disconnected / 1033"
+        elif health.overall == "origin_down":
+            label = "Tunnel: origin unavailable"
+        else:
+            label = f"Tunnel: {health.headline}"
+
+        self.tunnel_status_var.set(label[:88])
+        self.tunnel_status_detail = (
+            f"{health.headline}\n{health.detail}\n"
+            f"Checked: {health.checked_at}\n"
+            f"Cloudflared service: {'running' if health.service_running else 'not running'} "
+            f"(PID {health.service_pid or '-'})\n"
+            f"Local camera: HTTP {health.local_camera.status or '-'} · "
+            f"{health.local_camera.elapsed_ms} ms\n"
+            f"Public camera: HTTP {health.public_camera.status or '-'} · "
+            f"{health.public_camera.elapsed_ms} ms\n"
+            f"Dashboard health: HTTP {health.dashboard.status or '-'}\n"
+            f"SYSTEM watchdog: {'installed' if health.watchdog_installed else 'not installed'}"
+        )
+
+        page = self.pages.get("Diagnostics")
+        if isinstance(page, DiagnosticsPage):
+            page.apply_health(health)
+
+        notifications = bool(
+            self.config_data.get("tunnel_notifications_enabled", True)
+        )
+        good = {"healthy", "public_healthy_origin_uncertain", "access_protected", "route_reachable"}
+        ignored = {"", "unknown", "not_configured", "not_enabled"}
+        if notifications and previous not in ignored and previous != health.overall:
+            if previous in good and health.overall not in good:
+                self._show_tunnel_toast(
+                    "Cloudflare Tunnel needs attention",
+                    f"{health.headline}\n{health.detail}",
+                )
+            elif previous not in good and health.overall in good:
+                self._show_tunnel_toast(
+                    "Cloudflare Tunnel recovered",
+                    health.detail,
+                )
+
+    def _show_tunnel_toast(self, title: str, message: str) -> None:
+        try:
+            self.bell()
+            popup = ctk.CTkToplevel(self)
+            popup.title(title)
+            popup.geometry("430x170")
+            popup.resizable(False, False)
+            popup.attributes("-topmost", True)
+            popup.transient(self)
+            ctk.CTkLabel(
+                popup,
+                text=title,
+                font=ctk.CTkFont(size=17, weight="bold"),
+            ).pack(anchor="w", padx=18, pady=(16, 6))
+            ctk.CTkLabel(
+                popup,
+                text=message,
+                justify="left",
+                wraplength=390,
+            ).pack(anchor="w", padx=18, pady=(0, 10))
+            ctk.CTkButton(
+                popup,
+                text="Open diagnostics",
+                width=150,
+                command=lambda: (
+                    popup.destroy(),
+                    self.show_page("Diagnostics"),
+                ),
+            ).pack(anchor="e", padx=18, pady=(0, 14))
+            popup.after(9000, lambda: popup.winfo_exists() and popup.destroy())
+        except Exception:
+            pass
+
+    def refresh_tunnel_health(self) -> None:
+        self.tunnel_status_var.set("Tunnel: checking…")
+        self.tunnel_monitor.request_check()
+
+    def _launch_project_tool(self, filename: str) -> None:
+        path = PROJECT_ROOT / filename
+        if not path.exists():
+            messagebox.showerror(
+                "Tool not found",
+                f"The required file is missing:\n{path}",
+            )
+            return
+        if not sys.platform.startswith("win"):
+            messagebox.showinfo(
+                "Windows tool",
+                f"Run this file on Windows:\n{path}",
+            )
+            return
+        try:
+            os.startfile(str(path))  # type: ignore[attr-defined]
+        except Exception as exc:
+            messagebox.showerror("Could not start tool", str(exc))
+
+    def run_full_diagnosis(self) -> None:
+        self._launch_project_tool("FOCUS_STUDIO_DIAGNOSIS.bat")
+
+    def run_tunnel_repair(self) -> None:
+        self._launch_project_tool("REPAIR_CLOUDFLARE_TUNNEL.bat")
+
+    def install_tunnel_watchdog(self) -> None:
+        self._launch_project_tool("INSTALL_TUNNEL_WATCHDOG.bat")
+
+    def remove_tunnel_watchdog(self) -> None:
+        self._launch_project_tool("REMOVE_TUNNEL_WATCHDOG.bat")
 
     def make_pixela_client(self) -> PixelaClient:
         return PixelaClient(
@@ -841,7 +988,7 @@ class FocusApp(ctk.CTk):
     def _build_sidebar(self) -> None:
         sidebar = ctk.CTkFrame(self, width=312, corner_radius=0)
         sidebar.grid(row=0, column=0, sticky="nsew")
-        sidebar.grid_rowconfigure(9, weight=1)
+        sidebar.grid_rowconfigure(10, weight=1)
         sidebar.grid_propagate(False)
 
         ctk.CTkLabel(
@@ -886,6 +1033,7 @@ class FocusApp(ctk.CTk):
             "Sessions",
             "Analytics",
             "Pixela",
+            "Diagnostics",
             "Settings",
         ]
         for index, name in enumerate(page_names, start=3):
@@ -904,7 +1052,7 @@ class FocusApp(ctk.CTk):
             self.nav_buttons[name] = button
 
         status_card = ctk.CTkFrame(sidebar, corner_radius=12)
-        status_card.grid(row=10, column=0, padx=14, pady=14, sticky="sew")
+        status_card.grid(row=11, column=0, padx=14, pady=14, sticky="sew")
         ctk.CTkLabel(
             status_card,
             textvariable=self.sync_status_var,
@@ -936,6 +1084,14 @@ class FocusApp(ctk.CTk):
             text_color=("#64748b", "#94a3b8"),
             font=ctk.CTkFont(size=11),
         ).pack(anchor="w", padx=12, pady=(0, 5))
+        ctk.CTkLabel(
+            status_card,
+            textvariable=self.tunnel_status_var,
+            wraplength=258,
+            justify="left",
+            text_color=("#64748b", "#94a3b8"),
+            font=ctk.CTkFont(size=11),
+        ).pack(anchor="w", padx=12, pady=(0, 5))
         ctk.CTkSwitch(
             status_card,
             text="Allow private camera",
@@ -943,6 +1099,12 @@ class FocusApp(ctk.CTk):
             command=self.toggle_remote_camera,
             font=ctk.CTkFont(size=11),
         ).pack(anchor="w", padx=12, pady=(0, 8))
+        ctk.CTkButton(
+            status_card,
+            text="Tunnel diagnostics",
+            height=30,
+            command=lambda: self.show_page("Diagnostics"),
+        ).pack(fill="x", padx=12, pady=(0, 6))
         ctk.CTkButton(
             status_card,
             text="Connection details",
@@ -983,6 +1145,7 @@ class FocusApp(ctk.CTk):
             "Sessions": SessionsPage(host, self),
             "Analytics": AnalyticsPage(host, self),
             "Pixela": PixelaPage(host, self),
+            "Diagnostics": DiagnosticsPage(host, self),
             "Settings": SettingsPage(host, self),
         }
         for page in self.pages.values():
@@ -1113,6 +1276,7 @@ class FocusApp(ctk.CTk):
             self.cloud_syncer.stop()
         if self.camera_server is not None:
             self.camera_server.stop()
+        self.tunnel_monitor.stop()
         self.destroy()
 
 
@@ -2509,7 +2673,7 @@ class SessionsPage(PageBase):
         ctk.CTkComboBox(
             filters,
             variable=self.range_var,
-            values=["7 days", "30 days", "90 days", "All"],
+            values=["1 day", "3 days", "7 days", "30 days", "90 days", "All"],
             width=120,
             command=lambda _value: self.apply_filters(),
         ).grid(row=0, column=2, padx=4)
@@ -2610,7 +2774,7 @@ class SessionsPage(PageBase):
         style.map("Treeview", background=[("selected", selected)])
 
     def _range_days(self) -> int | None:
-        return {"7 days": 7, "30 days": 30, "90 days": 90, "All": None}.get(self.range_var.get())
+        return {"1 day": 1, "3 days": 3, "7 days": 7, "30 days": 30, "90 days": 90, "All": None}.get(self.range_var.get())
 
     def apply_filters(self) -> None:
         self.page = 1
@@ -3192,6 +3356,187 @@ class PixelaPage(PageBase):
         threading.Thread(target=worker, daemon=True).start()
 
 
+class DiagnosticsPage(PageBase):
+    def __init__(self, master, app: FocusApp):
+        super().__init__(
+            master,
+            app,
+            "Diagnostics and stability",
+            "See the local camera, Cloudflare connector, public route, dashboard, and watchdog in one place.",
+        )
+        self.overall_var = ctk.StringVar(value="Waiting for the first tunnel check…")
+        self.checked_var = ctk.StringVar(value="")
+        self.service_var = ctk.StringVar(value="Cloudflared: checking…")
+        self.local_var = ctk.StringVar(value="Local camera: checking…")
+        self.public_var = ctk.StringVar(value="Public camera: checking…")
+        self.dashboard_var = ctk.StringVar(value="Dashboard: checking…")
+        self.watchdog_var = ctk.StringVar(value="SYSTEM watchdog: checking…")
+        self._build()
+
+    def _build(self) -> None:
+        body = ctk.CTkScrollableFrame(self, corner_radius=16)
+        body.grid(row=1, column=0, padx=26, pady=(0, 24), sticky="nsew")
+        body.grid_columnconfigure((0, 1), weight=1)
+
+        summary = ctk.CTkFrame(body, corner_radius=14)
+        summary.grid(row=0, column=0, columnspan=2, padx=8, pady=8, sticky="ew")
+        summary.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            summary,
+            textvariable=self.overall_var,
+            font=ctk.CTkFont(size=19, weight="bold"),
+            wraplength=900,
+            justify="left",
+        ).grid(row=0, column=0, padx=16, pady=(16, 5), sticky="w")
+        ctk.CTkLabel(
+            summary,
+            textvariable=self.checked_var,
+            text_color=("#64748b", "#94a3b8"),
+        ).grid(row=1, column=0, padx=16, pady=(0, 14), sticky="w")
+
+        cards = [
+            ("Cloudflared Windows service", self.service_var, 1, 0),
+            ("Local camera origin", self.local_var, 1, 1),
+            ("Public Cloudflare route", self.public_var, 2, 0),
+            ("Cloud dashboard", self.dashboard_var, 2, 1),
+            ("Automatic SYSTEM watchdog", self.watchdog_var, 3, 0),
+        ]
+        for title, variable, row, column in cards:
+            card = ctk.CTkFrame(body, corner_radius=14)
+            card.grid(row=row, column=column, padx=8, pady=8, sticky="nsew")
+            card.grid_columnconfigure(0, weight=1)
+            ctk.CTkLabel(
+                card,
+                text=title,
+                font=ctk.CTkFont(size=15, weight="bold"),
+            ).grid(row=0, column=0, padx=14, pady=(14, 6), sticky="w")
+            ctk.CTkLabel(
+                card,
+                textvariable=variable,
+                wraplength=480,
+                justify="left",
+            ).grid(row=1, column=0, padx=14, pady=(0, 14), sticky="w")
+
+        actions = ctk.CTkFrame(body, corner_radius=14)
+        actions.grid(row=3, column=1, padx=8, pady=8, sticky="nsew")
+        actions.grid_columnconfigure((0, 1), weight=1)
+        ctk.CTkLabel(
+            actions,
+            text="Actions",
+            font=ctk.CTkFont(size=15, weight="bold"),
+        ).grid(row=0, column=0, columnspan=2, padx=14, pady=(14, 8), sticky="w")
+        ctk.CTkButton(
+            actions,
+            text="Refresh now",
+            command=self.app.refresh_tunnel_health,
+        ).grid(row=1, column=0, padx=(14, 5), pady=5, sticky="ew")
+        ctk.CTkButton(
+            actions,
+            text="Full diagnosis ZIP",
+            command=self.app.run_full_diagnosis,
+        ).grid(row=1, column=1, padx=(5, 14), pady=5, sticky="ew")
+        ctk.CTkButton(
+            actions,
+            text="Repair Cloudflare Tunnel",
+            command=self.app.run_tunnel_repair,
+        ).grid(row=2, column=0, padx=(14, 5), pady=5, sticky="ew")
+        ctk.CTkButton(
+            actions,
+            text="Install auto-recovery",
+            command=self.app.install_tunnel_watchdog,
+        ).grid(row=2, column=1, padx=(5, 14), pady=5, sticky="ew")
+        ctk.CTkButton(
+            actions,
+            text="Remove auto-recovery",
+            fg_color=("#e2e8f0", "#2b3542"),
+            text_color=("#1f2937", "#e5e7eb"),
+            hover_color=("#cbd5e1", "#3b4756"),
+            command=self.app.remove_tunnel_watchdog,
+        ).grid(row=3, column=0, columnspan=2, padx=14, pady=(5, 14), sticky="ew")
+
+        ctk.CTkLabel(
+            body,
+            text="Technical details",
+            font=ctk.CTkFont(size=16, weight="bold"),
+        ).grid(row=4, column=0, columnspan=2, padx=12, pady=(14, 6), sticky="w")
+        self.details = ctk.CTkTextbox(body, height=270, wrap="word")
+        self.details.grid(row=5, column=0, columnspan=2, padx=8, pady=(0, 12), sticky="ew")
+        self.details.insert(
+            "1.0",
+            "The first health result will appear here. This page never reads or displays the Cloudflare tunnel token.",
+        )
+        self.details.configure(state="disabled")
+
+        ctk.CTkLabel(
+            body,
+            text=(
+                "The automatic watchdog runs as a Windows Scheduled Task under SYSTEM. "
+                "It restarts cloudflared only after repeated public-route failures while the local camera is healthy. "
+                "It does not reset adapters, Winsock, v2rayN, Tailscale, or Windows proxy settings."
+            ),
+            wraplength=980,
+            justify="left",
+            text_color=("#64748b", "#94a3b8"),
+        ).grid(row=6, column=0, columnspan=2, padx=12, pady=(0, 16), sticky="w")
+
+    @staticmethod
+    def _endpoint_text(name: str, endpoint) -> str:
+        if not endpoint.url:
+            return f"{name}: not configured"
+        status = endpoint.status or "no response"
+        extra = endpoint.error or endpoint.body_preview
+        if len(extra) > 180:
+            extra = extra[:180] + "…"
+        suffix = f"\n{extra}" if extra else ""
+        return f"{name}: HTTP {status} · {endpoint.elapsed_ms} ms{suffix}"
+
+    def apply_health(self, health: TunnelHealth) -> None:
+        self.overall_var.set(f"{health.headline} — {health.detail}")
+        self.checked_var.set(f"Last checked: {health.checked_at}")
+        self.service_var.set(
+            f"Installed: {'yes' if health.service_installed else 'no'}\n"
+            f"Running: {'yes' if health.service_running else 'no'}\n"
+            f"Start mode: {health.service_start_mode or '-'}\n"
+            f"PID: {health.service_pid or '-'}"
+        )
+        self.local_var.set(self._endpoint_text("Local camera", health.local_camera))
+        self.public_var.set(self._endpoint_text("Public camera", health.public_camera))
+        self.dashboard_var.set(self._endpoint_text("Dashboard", health.dashboard))
+        self.watchdog_var.set(
+            f"Installed: {'yes' if health.watchdog_installed else 'no'}\n"
+            f"Last check: {health.watchdog_last_check or '-'}\n"
+            f"Last action: {health.watchdog_last_action or '-'}"
+        )
+        lines = [
+            f"Overall: {health.overall}",
+            f"Headline: {health.headline}",
+            f"Detail: {health.detail}",
+            "",
+            self._endpoint_text("Local camera", health.local_camera),
+            "",
+            self._endpoint_text("Public camera", health.public_camera),
+            "",
+            self._endpoint_text("Cloud dashboard", health.dashboard),
+            "",
+            f"Cloudflared service installed: {health.service_installed}",
+            f"Cloudflared service running: {health.service_running}",
+            f"Cloudflared start mode: {health.service_start_mode}",
+            f"Cloudflared PID: {health.service_pid}",
+            f"SYSTEM watchdog installed: {health.watchdog_installed}",
+            f"SYSTEM watchdog last check: {health.watchdog_last_check or '-'}",
+            f"SYSTEM watchdog last action: {health.watchdog_last_action or '-'}",
+        ]
+        self.details.configure(state="normal")
+        self.details.delete("1.0", "end")
+        self.details.insert("1.0", "\n".join(lines))
+        self.details.configure(state="disabled")
+
+    def refresh(self) -> None:
+        if self.app._last_tunnel_health is not None:
+            self.apply_health(self.app._last_tunnel_health)
+        self.app.refresh_tunnel_health()
+
+
 class SettingsPage(PageBase):
     def __init__(self, master, app: FocusApp):
         super().__init__(
@@ -3532,8 +3877,38 @@ class SettingsPage(PageBase):
             command=lambda: self.app.show_page("Schedule"),
         ).grid(row=3, column=0, padx=14, pady=(0, 14), sticky="ew")
 
+        stability = self._section(scroll, "Stability and tunnel monitoring", 3, 0)
+        self._switch(
+            stability,
+            "Monitor the Cloudflare Tunnel in the app",
+            "tunnel_monitor_enabled",
+            0,
+        )
+        self._entry(
+            stability,
+            "Health-check interval in seconds (10–600)",
+            "tunnel_check_seconds",
+            1,
+        )
+        self._switch(
+            stability,
+            "Notify when the tunnel disconnects or recovers",
+            "tunnel_notifications_enabled",
+            2,
+        )
+        ctk.CTkButton(
+            stability,
+            text="Open Diagnostics page",
+            command=lambda: self.app.show_page("Diagnostics"),
+        ).grid(row=7, column=0, padx=14, pady=(8, 6), sticky="ew")
+        ctk.CTkButton(
+            stability,
+            text="Install automatic SYSTEM watchdog",
+            command=self.app.install_tunnel_watchdog,
+        ).grid(row=8, column=0, padx=14, pady=(0, 14), sticky="ew")
+
         buttons = ctk.CTkFrame(scroll, fg_color="transparent")
-        buttons.grid(row=3, column=0, columnspan=2, padx=8, pady=18)
+        buttons.grid(row=4, column=0, columnspan=2, padx=8, pady=18)
         ctk.CTkButton(buttons, text="Save settings", width=160, height=42, command=self.save).pack(side="left", padx=6)
         ctk.CTkButton(buttons, text="Save and test Pixela", width=160, height=42, command=self.save_and_test).pack(side="left", padx=6)
 
@@ -3572,6 +3947,7 @@ class SettingsPage(PageBase):
             "remote_camera_idle_seconds",
             "remote_camera_session_minutes",
             "tailscale_camera_port",
+            "tunnel_check_seconds",
         ]
         new_config = dict(self.app.config_data)
         try:
@@ -3589,6 +3965,13 @@ class SettingsPage(PageBase):
 
         if new_config["focus_minutes"] < 1 or new_config["short_break_minutes"] < 1:
             messagebox.showerror("Invalid settings", "Timer lengths must be at least one minute.")
+            return False
+
+        if not 10 <= new_config["tunnel_check_seconds"] <= 600:
+            messagebox.showerror(
+                "Invalid settings",
+                "Tunnel health-check interval must be from 10 to 600 seconds.",
+            )
             return False
 
         if new_config["remote_camera_index"] < 0:
@@ -3700,6 +4083,7 @@ class SettingsPage(PageBase):
             bool(new_config.get("remote_camera_enabled", False))
         )
         self.app._configure_remote_camera()
+        self.app.tunnel_monitor.request_check()
         self.app.publish_cloud_snapshot_now()
         ctk.set_appearance_mode(new_config["appearance"])
         self.app.attributes("-topmost", bool(new_config["always_on_top"]))
