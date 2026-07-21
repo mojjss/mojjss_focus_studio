@@ -1092,7 +1092,7 @@ class FocusApp(ctk.CTk):
             self.nav_buttons[name] = button
 
         status_card = ctk.CTkFrame(sidebar, corner_radius=12)
-        status_card.grid(row=11, column=0, padx=14, pady=14, sticky="sew")
+        status_card.grid(row=3 + len(page_names), column=0, padx=14, pady=14, sticky="sew")
         ctk.CTkLabel(
             status_card,
             textvariable=self.sync_status_var,

@@ -175,7 +175,6 @@
       buttons.forEach((button) => button.classList.toggle("active", button.dataset.mode === chosen));
       const existingLive = [
         document.getElementById("cameraViewport"),
-        document.getElementById("cameraUnlockForm"),
         document.getElementById("cameraIdentity"),
         document.getElementById("cameraOpenPrivateButton"),
       ];
