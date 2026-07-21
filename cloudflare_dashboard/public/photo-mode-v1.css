@@ -1,0 +1,68 @@
+.camera-mode-extension {
+  margin: 0 0 1rem;
+  padding: .85rem;
+  border: 1px solid rgba(148, 163, 184, .25);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, .035);
+}
+.camera-mode-picker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .5rem;
+}
+.camera-mode-picker button,
+.photo-mode-actions button,
+.photo-mode-actions select {
+  min-height: 40px;
+  border-radius: 10px;
+}
+.camera-mode-picker button.active {
+  background: #2563eb;
+  color: white;
+}
+.photo-mode-panel { margin-top: .8rem; }
+.photo-mode-note,
+.photo-mode-status {
+  margin: .55rem 0;
+  color: var(--muted, #64748b);
+}
+.photo-mode-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .55rem;
+  align-items: end;
+}
+.photo-mode-actions label {
+  display: grid;
+  gap: .2rem;
+  font-size: .85rem;
+}
+.photo-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: .75rem;
+  margin-top: .8rem;
+}
+.photo-shot {
+  margin: 0;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, .28);
+  background: rgba(15, 23, 42, .05);
+}
+.photo-shot img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
+.photo-shot figcaption {
+  padding: .45rem .6rem;
+  font-size: .76rem;
+  color: var(--muted, #64748b);
+}
+.photo-mode-hide-live { display: none !important; }
+@media (max-width: 640px) {
+  .photo-mode-actions { display: grid; grid-template-columns: 1fr; }
+  .photo-mode-actions button, .photo-mode-actions select { width: 100%; }
+}

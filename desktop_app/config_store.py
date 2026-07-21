@@ -36,6 +36,8 @@ DEFAULT_CONFIG = {
     "cloud_sync_idle_seconds": 30,
     "cloud_device_id": "",
     "remote_camera_enabled": False,
+    "remote_camera_snapshot_enabled": True,
+    "remote_camera_default_mode": "photos",
     "remote_camera_index": 0,
     "remote_camera_width": 960,
     "remote_camera_height": 540,

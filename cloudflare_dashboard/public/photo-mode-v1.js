@@ -1,0 +1,255 @@
+(() => {
+  "use strict";
+
+  const storageKey = "focusCameraMode";
+  const passwordKey = "mojjssPrivateCameraPassword";
+  const objectUrls = new Set();
+
+  function dashboardKey() {
+    return (localStorage.getItem("focusDashboardReadKey") || "").trim();
+  }
+
+  function authHeaders(json = false) {
+    const headers = { "X-Dashboard-Key": dashboardKey() };
+    if (json) headers["Content-Type"] = "application/json";
+    return headers;
+  }
+
+  async function api(path, options = {}) {
+    const response = await fetch(path, {
+      cache: "no-store",
+      ...options,
+      headers: { ...authHeaders(Boolean(options.body)), ...(options.headers || {}) },
+    });
+    const type = response.headers.get("content-type") || "";
+    const data = type.includes("application/json") ? await response.json() : null;
+    if (!response.ok) throw new Error(data?.error || `HTTP ${response.status}`);
+    return data;
+  }
+
+  function bytesToBase64Url(bytes) {
+    let binary = "";
+    for (const value of bytes) binary += String.fromCharCode(value);
+    return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/g, "");
+  }
+
+  async function proofFor(password, requestId, saltB64, iterations) {
+    const encoder = new TextEncoder();
+    const passwordKeyMaterial = await crypto.subtle.importKey(
+      "raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]
+    );
+    const salt = Uint8Array.from(atob(saltB64), (char) => char.charCodeAt(0));
+    const keyBits = await crypto.subtle.deriveBits(
+      {
+        name: "PBKDF2",
+        salt,
+        iterations: Number(iterations) || 100000,
+        hash: "SHA-256",
+      },
+      passwordKeyMaterial,
+      256,
+    );
+    const hmacKey = await crypto.subtle.importKey(
+      "raw", keyBits, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+    );
+    const signature = await crypto.subtle.sign(
+      "HMAC",
+      hmacKey,
+      encoder.encode(`focus-studio-camera-photo-v1:${requestId}`),
+    );
+    return bytesToBase64Url(new Uint8Array(signature));
+  }
+
+  function uuidText() {
+    if (crypto.randomUUID) return crypto.randomUUID().replaceAll("-", "");
+    const bytes = crypto.getRandomValues(new Uint8Array(24));
+    return bytesToBase64Url(bytes);
+  }
+
+  function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+  async function waitForPhoto(requestId, statusNode) {
+    const deadline = Date.now() + 90000;
+    while (Date.now() < deadline) {
+      const state = await api(`/api/camera/status?request_id=${encodeURIComponent(requestId)}`);
+      if (state.status === "ready") return state;
+      if (["error", "expired", "cancelled"].includes(state.status)) {
+        throw new Error(state.message || `Photo request ${state.status}.`);
+      }
+      statusNode.textContent = state.status === "processing" ? "Taking photo…" : "Waiting for the desktop…";
+      await sleep(1400);
+    }
+    throw new Error("The desktop did not return a photo in time.");
+  }
+
+  async function imageBlob(requestId) {
+    const response = await fetch(
+      `/api/camera/image?request_id=${encodeURIComponent(requestId)}`,
+      { headers: authHeaders(), cache: "no-store" },
+    );
+    if (!response.ok) {
+      let message = `HTTP ${response.status}`;
+      try { message = (await response.json()).error || message; } catch {}
+      throw new Error(message);
+    }
+    return response.blob();
+  }
+
+  function addPhoto(gallery, blob, metadata) {
+    const url = URL.createObjectURL(blob);
+    objectUrls.add(url);
+    const figure = document.createElement("figure");
+    figure.className = "photo-shot";
+    const image = document.createElement("img");
+    image.src = url;
+    image.alt = "Remote camera photo";
+    image.loading = "lazy";
+    const caption = document.createElement("figcaption");
+    const when = metadata?.captured_at ? new Date(metadata.captured_at).toLocaleString() : "Just now";
+    caption.textContent = `${when} · ${metadata?.width || "?"}×${metadata?.height || "?"}`;
+    const save = document.createElement("a");
+    save.href = url;
+    save.download = `focus-studio-${metadata?.request_id || Date.now()}.jpg`;
+    save.textContent = "Save";
+    caption.append(" · ", save);
+    figure.append(image, caption);
+    gallery.prepend(figure);
+  }
+
+  async function setup() {
+    const liveButton = document.getElementById("cameraButton");
+    const passwordInput = document.getElementById("cameraPassword");
+    if (!liveButton || !passwordInput) return;
+    const card = liveButton.closest("section, article, .card") || liveButton.parentElement;
+    if (!card || card.querySelector("[data-photo-mode-root]")) return;
+
+    let statusPayload;
+    try { statusPayload = await api("/api/status"); }
+    catch { return; }
+    const camera = statusPayload?.camera || {};
+    const modes = Array.isArray(camera.allowed_modes) ? camera.allowed_modes : ["live", "photos"];
+    const photosAllowed = modes.includes("photos") && camera.photos_enabled !== false;
+    const liveAllowed = modes.includes("live");
+
+    const root = document.createElement("div");
+    root.dataset.photoModeRoot = "1";
+    root.className = "camera-mode-extension";
+    root.innerHTML = `
+      <div class="camera-mode-picker" role="group" aria-label="Camera mode">
+        <button type="button" data-mode="live">Live</button>
+        <button type="button" data-mode="photos">Photos</button>
+      </div>
+      <div class="photo-mode-panel" hidden>
+        <p class="photo-mode-note">Request one or several still photos. This uses the same camera password as Live mode.</p>
+        <div class="photo-mode-actions">
+          <label>Photos
+            <select data-photo-count>
+              <option value="1">1</option>
+              <option value="3">3</option>
+              <option value="5">5</option>
+            </select>
+          </label>
+          <button type="button" data-take-photos>Take photo</button>
+          <button type="button" data-refresh-photos>Recent</button>
+        </div>
+        <p class="photo-mode-status" data-photo-status>Ready.</p>
+        <div class="photo-gallery" data-photo-gallery></div>
+      </div>`;
+    card.prepend(root);
+
+    const panel = root.querySelector(".photo-mode-panel");
+    const gallery = root.querySelector("[data-photo-gallery]");
+    const photoStatus = root.querySelector("[data-photo-status]");
+    const takeButton = root.querySelector("[data-take-photos]");
+    const refreshButton = root.querySelector("[data-refresh-photos]");
+    const countSelect = root.querySelector("[data-photo-count]");
+    const buttons = [...root.querySelectorAll("[data-mode]")];
+
+    buttons.find((button) => button.dataset.mode === "live").disabled = !liveAllowed;
+    buttons.find((button) => button.dataset.mode === "photos").disabled = !photosAllowed;
+
+    function setMode(mode) {
+      const chosen = mode === "photos" && photosAllowed ? "photos" : liveAllowed ? "live" : "photos";
+      localStorage.setItem(storageKey, chosen);
+      panel.hidden = chosen !== "photos";
+      buttons.forEach((button) => button.classList.toggle("active", button.dataset.mode === chosen));
+      const existingLive = [
+        document.getElementById("cameraViewport"),
+        document.getElementById("cameraUnlockForm"),
+        document.getElementById("cameraIdentity"),
+        document.getElementById("cameraOpenPrivateButton"),
+      ];
+      existingLive.forEach((node) => {
+        if (node) node.classList.toggle("photo-mode-hide-live", chosen === "photos");
+      });
+    }
+
+    buttons.forEach((button) => button.addEventListener("click", () => setMode(button.dataset.mode)));
+    const preferred = localStorage.getItem(storageKey) || camera.default_mode || (photosAllowed ? "photos" : "live");
+    setMode(preferred);
+
+    function password() {
+      const value = passwordInput.value || sessionStorage.getItem(passwordKey) || "";
+      if (value) sessionStorage.setItem(passwordKey, value);
+      return value;
+    }
+
+    async function requestOne() {
+      const secret = password();
+      if (!secret) throw new Error("Enter the camera password first.");
+      if (!camera.password_salt || !camera.password_iterations) {
+        throw new Error("The desktop has not published camera password metadata yet.");
+      }
+      const requestId = uuidText();
+      const proof = await proofFor(secret, requestId, camera.password_salt, camera.password_iterations);
+      await api("/api/camera/request", {
+        method: "POST",
+        body: JSON.stringify({ request_id: requestId, proof }),
+      });
+      const metadata = await waitForPhoto(requestId, photoStatus);
+      const blob = await imageBlob(requestId);
+      addPhoto(gallery, blob, { ...metadata, request_id: requestId });
+    }
+
+    takeButton.addEventListener("click", async () => {
+      takeButton.disabled = true;
+      refreshButton.disabled = true;
+      try {
+        const total = Number(countSelect.value) || 1;
+        for (let index = 0; index < total; index += 1) {
+          photoStatus.textContent = `Photo ${index + 1} of ${total}…`;
+          await requestOne();
+          if (index + 1 < total) await sleep(1200);
+        }
+        photoStatus.textContent = `${total} photo${total === 1 ? "" : "s"} received.`;
+      } catch (error) {
+        photoStatus.textContent = error?.message || String(error);
+      } finally {
+        takeButton.disabled = false;
+        refreshButton.disabled = false;
+      }
+    });
+
+    refreshButton.addEventListener("click", async () => {
+      refreshButton.disabled = true;
+      try {
+        const recent = await api("/api/camera/recent");
+        gallery.replaceChildren();
+        for (const item of recent.photos || []) {
+          const blob = await imageBlob(item.request_id);
+          addPhoto(gallery, blob, item);
+        }
+        photoStatus.textContent = `${(recent.photos || []).length} recent photo(s).`;
+      } catch (error) {
+        photoStatus.textContent = error?.message || String(error);
+      } finally {
+        refreshButton.disabled = false;
+      }
+    });
+  }
+
+  window.addEventListener("beforeunload", () => {
+    objectUrls.forEach((url) => URL.revokeObjectURL(url));
+  });
+  document.addEventListener("DOMContentLoaded", setup);
+})();

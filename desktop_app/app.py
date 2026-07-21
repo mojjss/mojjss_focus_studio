@@ -24,6 +24,9 @@ from charts import AnalyticsChart
 from cloud_client import CloudDashboardPublisher
 from cloud_sync import CloudStateSynchronizer
 from camera_security import derive_camera_password, has_camera_password
+from camera_snapshot_bridge import SnapshotCameraBridge
+from todo_store import TodoStore
+from todo_page import TodoPage
 from version import APP_VERSION
 
 from tailscale_camera import (
@@ -83,6 +86,7 @@ class FocusApp(ctk.CTk):
         self.zone = ZoneInfo(config["timezone"])
         self.store = SessionStore(DB_PATH, config["timezone"], READABLE_DIR)
         self.schedule_store = ScheduleStore(APP_DIR / "schedule.csv")
+        self.todo_store = TodoStore(APP_DIR / "todo.csv")
         self.pixela = self.make_pixela_client()
         self._monitor_lock = threading.Lock()
         self._monitor_snapshot: dict[str, Any] = {
@@ -102,6 +106,7 @@ class FocusApp(ctk.CTk):
         self._cloud_client_since: str | None = None
         self._cloud_server_since: str | None = None
         self.camera_server: TailscaleCameraServer | None = None
+        self.snapshot_camera_bridge: SnapshotCameraBridge | None = None
         self.tunnel_monitor = TunnelHealthMonitor(
             config_provider=lambda: self.config_data,
             callback=self._set_tunnel_health_threadsafe,
@@ -142,6 +147,7 @@ class FocusApp(ctk.CTk):
         self._configure_cloud_publisher()
         self._configure_cloud_syncer()
         self._configure_remote_camera()
+        self._configure_snapshot_camera()
         self.tunnel_monitor.start()
         self.after(1200, self._cloud_dashboard_tick)
         self.after(1800, self._cloud_sync_tick)
@@ -257,6 +263,20 @@ class FocusApp(ctk.CTk):
                 ).rstrip("/"),
                 "password_protected": has_camera_password(
                     self.config_data
+                ),
+                "photos_enabled": bool(
+                    self.config_data.get("remote_camera_snapshot_enabled", True)
+                ),
+                "allowed_modes": ["live", "photos"],
+                "default_mode": str(
+                    self.config_data.get("remote_camera_default_mode", "photos")
+                ),
+                "password_salt": str(
+                    self.config_data.get("remote_camera_password_salt", "")
+                ),
+                "password_iterations": int(
+                    self.config_data.get("remote_camera_password_iterations", 100000)
+                    or 100000
                 ),
                 "tailscale_identity_required": bool(
                     self.config_data.get(
@@ -530,6 +550,45 @@ class FocusApp(ctk.CTk):
 
         return ", ".join(origins)
 
+    def _set_snapshot_camera_status_threadsafe(self, message: str) -> None:
+        try:
+            self.after(0, lambda: self.camera_status_var.set(message[:82]))
+        except Exception:
+            pass
+
+    def _configure_snapshot_camera(self) -> None:
+        if self.snapshot_camera_bridge is not None:
+            self.snapshot_camera_bridge.stop()
+            self.snapshot_camera_bridge = None
+        enabled = bool(self.config_data.get("remote_camera_enabled", False))
+        photos_enabled = bool(
+            self.config_data.get("remote_camera_snapshot_enabled", True)
+        )
+        if not enabled or not photos_enabled or not has_camera_password(self.config_data):
+            return
+        base_url = str(self.config_data.get("cloud_dashboard_url", "")).strip()
+        write_key = str(
+            self.config_data.get("cloud_desktop_write_key", "")
+        ).strip()
+        if not base_url or not write_key:
+            self._set_snapshot_camera_status_threadsafe(
+                "Camera photos: enable and configure the cloud dashboard"
+            )
+            return
+        self.snapshot_camera_bridge = SnapshotCameraBridge(
+            base_url=base_url,
+            write_key=write_key,
+            password_config=self.config_data,
+            camera_index=int(self.config_data.get("remote_camera_index", 0)),
+            width=int(self.config_data.get("remote_camera_width", 960)),
+            height=int(self.config_data.get("remote_camera_height", 540)),
+            jpeg_quality=int(
+                self.config_data.get("remote_camera_jpeg_quality", 72)
+            ),
+            status_callback=self._set_snapshot_camera_status_threadsafe,
+        )
+        self.snapshot_camera_bridge.start()
+
     def _configure_remote_camera(self) -> None:
         if self.camera_server is not None:
             self.camera_server.stop()
@@ -655,6 +714,7 @@ class FocusApp(ctk.CTk):
         else:
             self._configure_remote_camera()
 
+        self._configure_snapshot_camera()
         self.publish_cloud_snapshot_now()
 
     def test_local_camera(self) -> None:
@@ -1008,6 +1068,7 @@ class FocusApp(ctk.CTk):
         page_names = [
             "Timer",
             "Focus",
+            "To Do",
             "Schedule",
             "Sessions",
             "Analytics",
@@ -1122,6 +1183,7 @@ class FocusApp(ctk.CTk):
         self.pages = {
             "Timer": timer_page,
             "Focus": FocusModePage(host, self, timer_page),
+            "To Do": TodoPage(host, self, timer_page, self.todo_store),
             "Schedule": SchedulePage(host, self),
             "Sessions": SessionsPage(host, self),
             "Analytics": AnalyticsPage(host, self),
@@ -1157,7 +1219,7 @@ class FocusApp(ctk.CTk):
             refresh()
 
     def refresh_data_views(self) -> None:
-        for name in ("Timer", "Focus", "Schedule", "Sessions", "Analytics", "Pixela"):
+        for name in ("Timer", "Focus", "To Do", "Schedule", "Sessions", "Analytics", "Pixela"):
             refresh = getattr(self.pages.get(name), "refresh", None)
             if callable(refresh):
                 refresh()
@@ -1261,6 +1323,9 @@ class FocusApp(ctk.CTk):
             self.cloud_publisher.stop()
         if self.cloud_syncer is not None:
             self.cloud_syncer.stop()
+        if self.snapshot_camera_bridge is not None:
+            self.snapshot_camera_bridge.stop()
+            self.snapshot_camera_bridge = None
         if self.camera_server is not None:
             self.camera_server.stop()
         self.tunnel_monitor.stop()
@@ -4275,6 +4340,7 @@ class SettingsPage(PageBase):
             bool(new_config.get("remote_camera_enabled", False))
         )
         self.app._configure_remote_camera()
+        self.app._configure_snapshot_camera()
         self.app.tunnel_monitor.request_check()
         self.app.publish_cloud_snapshot_now()
         ctk.set_appearance_mode(new_config["appearance"])
@@ -4376,3 +4442,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+# FOCUS_STUDIO_PHOTO_TODO_UPDATE_V1
