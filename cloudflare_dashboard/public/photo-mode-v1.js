@@ -467,5 +467,85 @@
     objectUrls.forEach((url) => URL.revokeObjectURL(url));
   });
 
-  document.addEventListener("DOMContentLoaded", setup);
+  let setupInProgress = false;
+  let retryTimer = null;
+
+  async function ensurePhotoMode() {
+    if (document.querySelector("[data-photo-mode-root]")) {
+      return true;
+    }
+
+    if (setupInProgress || !dashboardKey()) {
+      return false;
+    }
+
+    setupInProgress = true;
+
+    try {
+      await setup();
+    } catch (error) {
+      console.warn("Photo mode setup is waiting for dashboard access.", error);
+    } finally {
+      setupInProgress = false;
+    }
+
+    return Boolean(
+      document.querySelector("[data-photo-mode-root]"),
+    );
+  }
+
+  function schedulePhotoModeSetup(delay = 0) {
+    if (retryTimer !== null) {
+      clearTimeout(retryTimer);
+    }
+
+    retryTimer = window.setTimeout(async () => {
+      retryTimer = null;
+      const ready = await ensurePhotoMode();
+
+      /*
+       * Viewer and owner keys are saved only after the dashboard login
+       * request succeeds. Keep retrying so Photo mode appears even when
+       * this script initially loaded before the user entered a key.
+       */
+      if (!ready) {
+        schedulePhotoModeSetup(750);
+      }
+    }, delay);
+  }
+
+  function startPhotoModeBootstrap() {
+    const loginForm = document.getElementById("loginForm");
+
+    if (loginForm) {
+      loginForm.addEventListener(
+        "submit",
+        () => schedulePhotoModeSetup(250),
+        true,
+      );
+    }
+
+    window.addEventListener(
+      "focus",
+      () => schedulePhotoModeSetup(0),
+    );
+
+    window.addEventListener("storage", (event) => {
+      if (event.key === "focusDashboardReadKey") {
+        schedulePhotoModeSetup(0);
+      }
+    });
+
+    schedulePhotoModeSetup(0);
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener(
+      "DOMContentLoaded",
+      startPhotoModeBootstrap,
+      { once: true },
+    );
+  } else {
+    startPhotoModeBootstrap();
+  }
 })();
