@@ -132,14 +132,16 @@
     throw new Error("The desktop did not return a photo in time.");
   }
 
-  async function imageBlob(requestId) {
-    const response = await fetch(
-      `/api/camera/image?request_id=${encodeURIComponent(requestId)}`,
-      {
-        headers: authHeaders(),
-        cache: "no-store",
-      },
-    );
+  async function imageBlob(requestId, proof) {
+    const response = await fetch("/api/camera/image", {
+      method: "POST",
+      headers: authHeaders(true),
+      cache: "no-store",
+      body: JSON.stringify({
+        request_id: requestId,
+        proof,
+      }),
+    });
 
     if (!response.ok) {
       let message = `HTTP ${response.status}`;
@@ -403,7 +405,7 @@
         requestId,
         photoStatus,
       );
-      const blob = await imageBlob(requestId);
+      const blob = await imageBlob(requestId, proof);
 
       addPhoto(gallery, blob, {
         ...metadata,
@@ -442,23 +444,81 @@
 
     refreshButton.addEventListener("click", async () => {
       refreshButton.disabled = true;
+      takeButton.disabled = true;
 
       try {
-        const recent = await api("/api/camera/recent");
+        const secret = password();
+
+        if (!secret) {
+          throw new Error(
+            "Enter the camera password before opening Recent photos.",
+          );
+        }
+
+        if (!camera.password_salt || !camera.password_iterations) {
+          throw new Error(
+            "The desktop has not published camera password metadata yet.",
+          );
+        }
+
+        photoStatus.textContent = "Checking camera password…";
+
+        /*
+         * The challenge reveals only opaque random request IDs. It does not
+         * reveal photo metadata or image data. A password-derived proof is
+         * calculated separately for every ID.
+         */
+        const challenge = await api("/api/camera/recent-challenge");
+        const requestIds = Array.isArray(challenge.request_ids)
+          ? challenge.request_ids
+          : [];
+
+        if (!requestIds.length) {
+          gallery.replaceChildren();
+          photoStatus.textContent = "No recent photos.";
+          return;
+        }
+
+        const proofs = await Promise.all(
+          requestIds.map(async (requestId) => ({
+            request_id: requestId,
+            proof: await proofFor(
+              secret,
+              requestId,
+              camera.password_salt,
+              camera.password_iterations,
+            ),
+          })),
+        );
+
+        const recent = await api("/api/camera/recent", {
+          method: "POST",
+          body: JSON.stringify({ proofs }),
+        });
+
         gallery.replaceChildren();
 
         for (const item of recent.photos || []) {
-          const blob = await imageBlob(item.request_id);
+          const itemProof = await proofFor(
+            secret,
+            item.request_id,
+            camera.password_salt,
+            camera.password_iterations,
+          );
+          const blob = await imageBlob(item.request_id, itemProof);
           addPhoto(gallery, blob, item);
         }
 
+        const count = (recent.photos || []).length;
         photoStatus.textContent =
-          `${(recent.photos || []).length} recent photo(s).`;
+          `${count} password-protected recent photo${count === 1 ? "" : "s"}.`;
       } catch (error) {
+        gallery.replaceChildren();
         photoStatus.textContent =
           error?.message || String(error);
       } finally {
         refreshButton.disabled = false;
+        takeButton.disabled = false;
       }
     });
   }
